@@ -8,7 +8,7 @@ include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/jfc-cmake/jfclib.cmake")
 
 option(JFC_BUILD_DEMO "Build the demo" ON)
 option(JFC_BUILD_DOCS "Build documentation" OFF)
-option(JFC_BUILD_TESTS "Build unit tests" ON)
+option(JFC_BUILD_TESTS "Build unit tests" OFF)
 
 add_subdirectory(thirdparty)
 
@@ -22,6 +22,7 @@ jfc_project(library
 
     PUBLIC_INCLUDE_DIRECTORIES
         ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${LuaJIT_INCLUDE_DIR} # TODO private this once done messing with demo and build scripts
 
     PRIVATE_INCLUDE_DIRECTORIES
         ${CMAKE_CURRENT_SOURCE_DIR}/src/include
@@ -29,11 +30,11 @@ jfc_project(library
     SOURCE_LIST
         ${CMAKE_CURRENT_SOURCE_DIR}/src/stub.cpp
 
-#    LIBRARIES
-#       ${dependencyname_LIBRARIES} 
+    LIBRARIES
+        "${LuaJIT_LIBRARIES}"
 
-#    DEPENDENCIES
-#        "example"
+    DEPENDENCIES
+        "libluajit"
 )
 
 if (JFC_BUILD_DEMO)
@@ -47,3 +48,4 @@ endif()
 if (JFC_BUILD_DOCS)
     add_subdirectory(docs)
 endif()
+
