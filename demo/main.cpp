@@ -13,50 +13,28 @@
 
 #include <lua.hpp>
 
-class variable;
-
-/// \brief value type representation of a lua table
-class table
-{
-public:
-    //void insert(const std::string &aName, variable &);
-    
-private:
-    //std::map<std::string, variable> m_fields;
-};
-
-/*class variable
-{
-public:*/
-    using value_type = std::variant<bool,
-        double,
-        std::string,
-        table,
-        decltype(nullptr)>;
-//};
-
-/*void table::insert(const std::string &aName, variable &v)
-{
-    m_fields[aName] = v;
-}*/
-
 /// \brief a lua interpreter
 class interpreter final
 {
 public:
+    /// \brief methods that can fail return this
     using error_type = std::optional<std::string>;
-    using function_type = auto (*)(lua_State*) -> int;
+    /// \brief c++'s implementation of the closure is a lambda with a non-empty capture list
     using closure_type = std::function<int(lua_State *)>;
+    /// \brief supported value types that can be written and read between cpp and lua
+    using value_type = std::variant<bool, double, std::string, /*table,*/ decltype(nullptr)>;
 
-    void write_value(const std::string &path, const value_type &var);
+    /// \brief writes a number to the lua context
+    void write_value(const std::string &path, const value_type var);
+    /*/// \brief writes a boolean to the lua context
+    void write_value(const std::string &path, const bool var);
+    /// \brief writes a nil to the lua context
+    void write_value(const std::string &path, const typedef(nullptr));
+    // ..... */
 
     //TODO: calls a lua function if it exists: use for eg callbacks
     //error try_call_function(path..to..function, paramlist...);
 
-    //TODO plain function version. faster, less mem
-    /// \brief registers a function (c function pointer)
-    //void register_function(...)
-    //TODO handle errors etc
     /// \brief registers a closure (c++ lambda with captured data)
     void register_function(const std::string &aName, closure_type a);
 
@@ -79,53 +57,82 @@ private:
     std::unordered_map<std::string, closure_type> 
         m_RegisteredClosures;
 };
-void interpreter::write_value(const std::string &path, const value_type &var)
+
+void interpreter::write_value(const std::string &aPathString, const interpreter::value_type aValue)
 {
+    // parse pathstring
+    auto *L = m_pState.get();
+
     static const std::string delimiter(".");
 
-    std::vector<std::string> table_names;
+    std::vector<std::string> path;
 
     size_t last(0), next; 
 
-    while ((next = path.find(delimiter, last)) != std::string::npos) 
+    while ((next = aPathString.find(delimiter, last)) != std::string::npos) 
     {   
-        table_names.push_back(path.substr(last, next - last));
+        path.push_back(aPathString.substr(last, next - last));
 
         last = next + 1; 
     }
 
-    const std::string variableName = path.substr(last);
-
-    if (table_names.size())
+    const std::string variableName = aPathString.substr(last);
+   
+    // global variable case
+    if (path.empty())
     {
-        auto asdf = lua_getglobal(m_pState.get(), table_names[0].c_str());
+        lua_pushnumber(L, std::get<double>(aValue));
+
+        lua_setglobal(L, variableName.c_str());
+    }
+    // nested case
+    else 
+    {
+        lua_getglobal(L, path[0].c_str());
+        if (!lua_istable(L, -1))
         {
-            //LUA_TTABLE
+            lua_pop(L, 1);
+
+            lua_newtable(L);
+            lua_setglobal(L, path[0].c_str());
+            lua_getglobal(L, path[0].c_str());
         }
 
-        
-
-        //ilua_getglobalf (global
-    }
-
-    /*
-    if (table.size())
-    {
-        if (globaltable table[0] !exist) makeglobaltable table[0]
-
-        if (table.size() > 1)
+        for (size_t i(1); i < path.size(); ++i)
         {
-            if globaltable !has table[1] maketable in globaltable
+            bool nestedTableExists(false);
 
-            for i(2) < table.size; ++i
+            lua_pushnil(L);
+            while (lua_next(L, -2))
             {
-                if table[i - 1] !has table[i] maketable in table[i - 1]
+                lua_pushvalue(L, -2);
 
-                if (i == table.size - 1) write value to table
+                if (path[i] == lua_tostring(L, -1) && lua_istable(L, -2))
+                {
+                    nestedTableExists = true;
+
+                    lua_pushvalue(L, -2);
+                    lua_pop(L, 2);
+
+                    break;
+                }
+
+                lua_pop(L, 2);
+            }
+            
+            if (!nestedTableExists)
+            {
+                lua_newtable(L);
+                lua_setfield(L, -2, path[i].c_str());
+                lua_getfield(L, -1, path[i].c_str());
             }
         }
-    {
-    */
+
+        lua_pushnumber(L, std::get<double>(aValue));
+    
+        if (path.empty()) lua_setglobal(L, variableName.c_str());
+        else lua_setfield(L, -2, variableName.c_str());
+    }
 }
 
 void interpreter::register_function(const std::string &aName, 
@@ -185,11 +192,24 @@ interpreter::error_type interpreter::validate_syntax(const std::string &aLuaScri
     }
 }
 
+static const std::string init((R"V0G0N(
+    junk = {}
+    debug = {
+        a = {
+            b = "123",
+            goof = "hello"
+        }
+    }
+
+)V0G0N"));
+
 static const std::string script((R"V0G0N(
-    a = 10
-    print(b.blar)
-    print(b.very_cool("asdf"))
-    print(very_silly(a))
+    print("-------------------")
+    print("c++ defined global: " .. written)
+    print("c++ defined nested: " .. debug.written)
+    print("c++ defined nested: " .. debug.a.b.c.d.written)
+    print("adhoc: " .. debug.a.goof)
+    print(debug.a.b)
 )V0G0N"));
 
 int main(int argc, char *argv[])
@@ -197,9 +217,14 @@ int main(int argc, char *argv[])
     interpreter interp;
     interpreter second_interp;
 
-    interp.write_value("debug.logging.utils", 123.);
+    interp.try_run_script(init);
 
-    int w = 123;
+    interp.write_value("written", 123.);
+    interp.write_value("debug.written", 456.);
+    interp.write_value("debug.a.b.c.d.written", 789.);
+    interp.write_value("global_number", 123.);
+
+    /*int w = 123;
 
     interp.register_function("b.very_cool", [&w](lua_State *p)
     {
@@ -211,6 +236,16 @@ int main(int argc, char *argv[])
         return 1;
     });
 
+    interp.register_function("very_silly", [](lua_State *p)
+    {
+        double d = lua_tonumber(p, 1);
+           
+        d -= 123;
+
+        lua_pushnumber(p, d);
+        return 1;
+    });*/
+    
     interp.register_function("print", [](lua_State *p)
     {
         size_t len;
@@ -221,21 +256,8 @@ int main(int argc, char *argv[])
         return 0;
     });
 
-    interp.register_function("very_silly", [](lua_State *p)
-    {
-        double d = lua_tonumber(p, 1);
-           
-        d -= 123;
-
-        lua_pushnumber(p, d);
-        return 1;
-    });
-
     if (auto error = interp.try_run_script(script))
         std::cout << "fist_interp: " << *error << "\n";
-
-    /*if (auto error = second_interp.try_run_script(script))
-        std::cout << "second_itnerp: " << *error << "\n";*/
 
     return EXIT_SUCCESS;
 }
