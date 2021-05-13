@@ -21,16 +21,17 @@ public:
     using error_type = std::optional<std::string>;
     /// \brief c++'s implementation of the closure is a lambda with a non-empty capture list
     using closure_type = std::function<int(lua_State *)>;
-    /// \brief supported value types that can be written and read between cpp and lua
-    using value_type = std::variant<bool, double, std::string, /*table,*/ decltype(nullptr)>;
 
+    /// \brief writes a boolean to the lua context
+    void write_value(const std::string &aPath, const bool aValue);
     /// \brief writes a number to the lua context
-    void write_value(const std::string &path, const value_type var);
-    /*/// \brief writes a boolean to the lua context
-    void write_value(const std::string &path, const bool var);
+    void write_value(const std::string &aPath, const double aValue);
+    /// \brief writes a string to the lua context
+    void write_value(const std::string &aPath, const std::string &aValue);
+    /// \brief writes a string to the lua context
+    void write_value(const std::string &aPath, const std::string::value_type *aValue);
     /// \brief writes a nil to the lua context
-    void write_value(const std::string &path, const typedef(nullptr));
-    // ..... */
+    void write_value(const std::string &aPath, std::nullptr_t);
 
     //TODO: calls a lua function if it exists: use for eg callbacks
     //error try_call_function(path..to..function, paramlist...);
@@ -58,11 +59,8 @@ private:
         m_RegisteredClosures;
 };
 
-void interpreter::write_value(const std::string &aPathString, const interpreter::value_type aValue)
+static void _write_value(lua_State *L, const std::string &aPathString, std::function<void()> &&aPushValueFunctor)
 {
-    // parse pathstring
-    auto *L = m_pState.get();
-
     static const std::string delimiter(".");
 
     std::vector<std::string> path;
@@ -78,15 +76,7 @@ void interpreter::write_value(const std::string &aPathString, const interpreter:
 
     const std::string variableName = aPathString.substr(last);
    
-    // global variable case
-    if (path.empty())
-    {
-        lua_pushnumber(L, std::get<double>(aValue));
-
-        lua_setglobal(L, variableName.c_str());
-    }
-    // nested case
-    else 
+    if (!path.empty())
     {
         lua_getglobal(L, path[0].c_str());
         if (!lua_istable(L, -1))
@@ -127,12 +117,40 @@ void interpreter::write_value(const std::string &aPathString, const interpreter:
                 lua_getfield(L, -1, path[i].c_str());
             }
         }
-
-        lua_pushnumber(L, std::get<double>(aValue));
-    
-        if (path.empty()) lua_setglobal(L, variableName.c_str());
-        else lua_setfield(L, -2, variableName.c_str());
     }
+
+    /*if (auto pVal = std::get_if<bool>(&aValue)) lua_pushboolean(L, static_cast<int>(*pVal));
+    else if (auto pVal = std::get_if<double>(&aValue)) lua_pushnumber(L, *pVal);
+    else if (auto pVal = std::get_if<std::string>(&aValue)) lua_pushstring(L, pVal->c_str());
+    else lua_pushnil(L);*/
+    aPushValueFunctor();
+
+    if (path.empty()) lua_setglobal(L, variableName.c_str());
+    else lua_setfield(L, -2, variableName.c_str());
+}
+
+void interpreter::write_value(const std::string &aPath, const bool aValue)
+{
+    _write_value(m_pState.get(), aPath, [L = m_pState.get(), aValue]()
+        { lua_pushboolean(L, aValue); });
+}
+
+void interpreter::write_value(const std::string &aPath, const double aValue)
+{
+    _write_value(m_pState.get(), aPath, [L = m_pState.get(), aValue]()
+        { lua_pushnumber(L, aValue); });
+}
+
+void interpreter::write_value(const std::string &aPath, const std::string &aValue)
+{
+    _write_value(m_pState.get(), aPath, [L = m_pState.get(), &aValue]()
+        { lua_pushstring(L, aValue.c_str()); });
+}
+
+void interpreter::write_value(const std::string &aPath, const std::string::value_type *aValue)
+{
+    _write_value(m_pState.get(), aPath, [L = m_pState.get(), &aValue]()
+        { lua_pushstring(L, aValue); });
 }
 
 void interpreter::register_function(const std::string &aName, 
@@ -219,9 +237,9 @@ int main(int argc, char *argv[])
 
     interp.try_run_script(init);
 
-    interp.write_value("written", 123.);
+    interp.write_value("written", "This is not a test");
     interp.write_value("debug.written", 456.);
-    interp.write_value("debug.a.b.c.d.written", 789.);
+    interp.write_value("debug.a.b.c.d.written", 6545.);
     interp.write_value("global_number", 123.);
 
     /*int w = 123;
