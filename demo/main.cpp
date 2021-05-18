@@ -14,16 +14,50 @@
 
 #include <lua.hpp>
 
-class table
+/// \brief datamodel type for table.
+class table //TODO
 {
     using value_type = std::unordered_map<std::string, 
         std::variant<double, bool, std::string>>;
 
     using children_type = std::unordered_map<std::string,
-        std::unique_ptr<table>>;
+        std::shared_ptr<table>>;
 
     //...
 };
+
+//table to string serializer. 
+//std::string string_table_serializer(const table &) {return "";} //TODO
+/*
+class table_serializer
+{
+    ???? serialize(table)
+    table deserialize(????)
+}; //TODO: do some reading about good serialization interface design
+*/
+
+
+//TODO: function wrapper stuff
+using params_type = std::vector<std::variant<double, bool, std::string, table>>;
+using return_type = params_type;
+
+/* brainstorming here....
+interp.reg_func("print_variadic", [](params_type params)
+{
+    for (auto param : params) std::cout << *param;
+
+    std::cout << "\n";
+
+    return {};
+}
+
+interp.reg_func("double_variadic", [](params_type params)
+{
+    for (auto param : params) &std::get<double>(param) *= 2;
+
+    return params;
+}
+*/
 
 /// \brief a lua interpreter
 class interpreter final
@@ -44,6 +78,8 @@ public:
     void write_value(const std::string &aPath, const std::string::value_type *aValue);
     /// \brief writes a nil to the lua context
     void write_value(const std::string &aPath, std::nullptr_t);
+    /// \brief writes a table to the lua context
+    //void write_value(const std::string &aPath, table);
 
     /// \brief reads a boolean from the lua context
     std::optional<bool> read_boolean(const std::string &aPath);
@@ -51,6 +87,10 @@ public:
     std::optional<double> read_number(const std::string &aPath);
     /// \brief reads a string from the lua context
     std::optional<std::string> read_string(const std::string &aPath);
+    /// \brief reads a table from the lua context
+    //std::optional<table> read_table(const std::string &aPath);
+    /// \brief reads a value of unknown type
+    //std::optional<std::variant<bool, double, std::string, table> read_any(const std::string &aPath);
 
     //TODO: calls a lua function if it exists: use for eg callbacks
     //error try_call_function(path..to..function, paramlist...);
