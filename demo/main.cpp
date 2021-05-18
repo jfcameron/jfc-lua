@@ -82,15 +82,15 @@ public:
     //void write_value(const std::string &aPath, table);
 
     /// \brief reads a boolean from the lua context
-    std::optional<bool> read_boolean(const std::string &aPath);
+    std::optional<bool> read_boolean(const std::string &aPath) const;
     /// \brief reads a number from the lua context
-    std::optional<double> read_number(const std::string &aPath);
+    std::optional<double> read_number(const std::string &aPath) const;
     /// \brief reads a string from the lua context
-    std::optional<std::string> read_string(const std::string &aPath);
+    std::optional<std::string> read_string(const std::string &aPath) const;
     /// \brief reads a table from the lua context
-    //std::optional<table> read_table(const std::string &aPath);
+    //std::optional<table> read_table(const std::string &aPath) const;
     /// \brief reads a value of unknown type
-    //std::optional<std::variant<bool, double, std::string, table> read_any(const std::string &aPath);
+    //std::optional<std::variant<bool, double, std::string, table> read_any(const std::string &aPath) const;
 
     //TODO: calls a lua function if it exists: use for eg callbacks
     //error try_call_function(path..to..function, paramlist...);
@@ -193,7 +193,7 @@ bool _read_value(lua_State *L, const std::string &aPath)
     return true;
 }
 
-std::optional<double> interpreter::read_number(const std::string &aPath)
+std::optional<double> interpreter::read_number(const std::string &aPath) const
 {
     auto *L(m_pState.get());
 
@@ -205,7 +205,7 @@ std::optional<double> interpreter::read_number(const std::string &aPath)
     return val;
 }
 
-std::optional<bool> interpreter::read_boolean(const std::string &aPath)
+std::optional<bool> interpreter::read_boolean(const std::string &aPath) const
 {
     auto *L(m_pState.get());
 
@@ -217,7 +217,7 @@ std::optional<bool> interpreter::read_boolean(const std::string &aPath)
     return val;
 }
 
-std::optional<std::string> interpreter::read_string(const std::string &aPath)
+std::optional<std::string> interpreter::read_string(const std::string &aPath) const
 {
     auto *L(m_pState.get());
 
