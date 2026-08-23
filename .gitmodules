@@ -1,6 +1,9 @@
 [submodule "cmake/jfc-cmake"]
 	path = cmake/jfc-cmake
 	url = https://github.com/jfcameron/jfc-cmake.git
-[submodule "thirdparty/LuaJIT"]
-	path = thirdparty/LuaJIT
-	url = https://github.com/jfcameron/LuaJIT.git
+[submodule "extern/LuaJIT"]
+	path = extern/LuaJIT
+	url = https://github.com/WohlSoft/LuaJIT.git
+[submodule "extern/lua51"]
+	path = extern/lua51
+	url = https://github.com/lua/lua

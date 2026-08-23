@@ -1,2 +1,2 @@
 * text=auto
-thirdparty/*/ linguist-vendored
+extern/*/ linguist-vendored
