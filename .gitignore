@@ -1,7 +1,3 @@
-workspace/*
-
+out/
+CMakeUserPresets.json
 !.keep
-!CMakeLists.txt
-!*.sh
-
-*.swp
