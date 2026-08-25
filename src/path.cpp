@@ -1,8 +1,8 @@
 // © Joseph Cameron - All Rights Reserved
 
-#include <jfc/lua_exception.h>
-#include <jfc/lua_key.h>
-#include <jfc/lua_path.h>
+#include <jfc/lua/exception.h>
+#include <jfc/lua/key.h>
+#include <jfc/lua/path.h>
 
 #include <cstdlib>
 #include <utility>
@@ -12,12 +12,11 @@
 #include <variant>
 #include <vector>
 
-namespace
-{
+namespace {
     constexpr const char *DELIMITERS = ".[]'\"";
 
-    [[nodiscard]] jfc::lua_exception _malformed(const std::string &aPath, const std::string &aWhy) {
-        return jfc::lua_exception("could not parse the path \"" + aPath + "\": " + aWhy);
+    [[nodiscard]] jfc::lua::exception _malformed(const std::string &aPath, const std::string &aWhy) {
+        return jfc::lua::exception("could not parse the path \"" + aPath + "\": " + aWhy);
     }
 
     [[nodiscard]] std::string _parse_quoted(const std::string &aPath, std::size_t &aIndex) {
@@ -149,7 +148,6 @@ namespace jfc::lua {
 
     bool path::operator==(const path &a) const { return m_Segments == a.m_Segments; }
 
-    bool path::operator!=(const path &a) const { return !(*this == a); }
 
     std::ostream &operator<<(std::ostream &out, const path &a)
     {

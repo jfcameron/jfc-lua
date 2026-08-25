@@ -197,7 +197,7 @@ TEST_CASE("running against an environment does not grow the lua stack", "[stack]
     SECTION("a path that throws, repeatedly") {
         REQUIRE(count_agreements([&](int) {
             try { (void)env->read_number("a["); return false; }
-            catch (const jfc::lua_exception &) { return true; }
+            catch (const jfc::lua::exception &) { return true; }
         }) == PAST_THE_CEILING);
     }
 

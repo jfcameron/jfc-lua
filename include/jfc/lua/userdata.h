@@ -3,7 +3,7 @@
 #ifndef JFC_LUA_USERDATA_H
 #define JFC_LUA_USERDATA_H
 
-#include <jfc/lua_types.h>
+#include <jfc/lua/types.h>
 
 #include <memory>
 #include <type_traits>
@@ -62,7 +62,6 @@ namespace jfc::lua
         [[nodiscard]] bool operator==(const userdata &a) const
             { return m_Object == a.m_Object && m_TypeKey == a.m_TypeKey; }
 
-        [[nodiscard]] bool operator!=(const userdata &a) const { return !(*this == a); }
 
     private:
         //! type erased, and keeping the object alive: a shared_ptr<void> made from a shared_ptr<T>

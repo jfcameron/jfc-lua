@@ -3,8 +3,8 @@
 #ifndef JFC_LUA_PATH_H
 #define JFC_LUA_PATH_H
 
-#include <jfc/lua_key.h>
-#include <jfc/lua_types.h>
+#include <jfc/lua/key.h>
+#include <jfc/lua/types.h>
 
 #include <cstddef>
 #include <initializer_list>
@@ -28,7 +28,7 @@ namespace jfc::lua
         explicit path(std::vector<key> aSegments);
 
         /// \brief parse the string form
-        /// \warn throws lua_exception if it does not parse
+        /// \warn throws exception if it does not parse
         path(const std::string &aPathString);
 
         /// \brief parse the string form
@@ -43,7 +43,6 @@ namespace jfc::lua
         [[nodiscard]] const std::vector<key> &segments() const;
 
         [[nodiscard]] bool operator==(const path &a) const;
-        [[nodiscard]] bool operator!=(const path &a) const;
 
         /// \brief write the string form
         friend std::ostream &operator<<(std::ostream &stream, const path &a);

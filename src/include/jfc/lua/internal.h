@@ -4,8 +4,7 @@
 #ifndef JFC_LUA_INTERNAL_H
 #define JFC_LUA_INTERNAL_H
 
-#include <jfc/lua_types.h>
-
+#include <jfc/lua/types.h>
 
 #include <lua.hpp>
 

@@ -257,7 +257,7 @@ TEST_CASE("from_string refuses what it cannot read, rather than guessing", "[tex
     for (const auto &text : malformed) {
         INFO("text: [" << text << "]");
 
-        REQUIRE_THROWS_AS(data_table::from_string(text), jfc::lua_exception);
+        REQUIRE_THROWS_AS(data_table::from_string(text), jfc::lua::exception);
     }
 }
 
@@ -266,11 +266,12 @@ TEST_CASE("a tampered save is a parse error, not a script", "[text]") {
         "{name=\"bob\",hp=42} ; stolen = 'yes' ; damage = (function() while true do end end)()";
 
     SECTION("from_string refuses it") {
-        REQUIRE_THROWS_AS(data_table::from_string(tampered), jfc::lua_exception);
+        REQUIRE_THROWS_AS(data_table::from_string(tampered), jfc::lua::exception);
     }
 
     SECTION("where running it executes the payload") {
-        interpreter interp(interpreter_policy{0, 0, 200000});
+        interpreter interp(interpreter_policy{.MEMORY_BUDGET_IN_BYTES = 0,
+            .MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN = 0, .INSTRUCTION_BUDGET = 200000});
 
         auto env = interp.make_environment();
 

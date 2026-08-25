@@ -3,11 +3,11 @@
 #ifndef JFC_LUA_ENVIRONMENT_H
 #define JFC_LUA_ENVIRONMENT_H
 
-#include <jfc/lua_path.h>
-#include <jfc/lua_reference.h>
-#include <jfc/lua_data_table.h>
-#include <jfc/lua_types.h>
-#include <jfc/lua_userdata.h>
+#include <jfc/lua/path.h>
+#include <jfc/lua/reference.h>
+#include <jfc/lua/data_table.h>
+#include <jfc/lua/types.h>
+#include <jfc/lua/userdata.h>
 
 #include <cstddef>
 #include <functional>

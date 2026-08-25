@@ -1,11 +1,11 @@
 // © Joseph Cameron - All Rights Reserved
 
-#include <jfc/lua_internal.h>
+#include <jfc/lua/internal.h>
 
-#include <jfc/lua_exception.h>
-#include <jfc/lua_environment.h>
-#include <jfc/lua_interpreter.h>
-#include <jfc/lua_data_table.h>
+#include <jfc/lua/exception.h>
+#include <jfc/lua/environment.h>
+#include <jfc/lua/interpreter.h>
+#include <jfc/lua/data_table.h>
 
 #include <cstdio>
 #include <cstdlib>
@@ -249,7 +249,7 @@ namespace jfc::lua {
 
         auto *const state = lua_newstate(_capped_alloc, m_pLimits.get());
 
-        if (!state) throw lua_exception("could not create a lua state");
+        if (!state) throw exception("could not create a lua state");
 
         m_pState = std::shared_ptr<lua_State>(state,
             [limits = m_pLimits](lua_State *p) { lua_close(p); });

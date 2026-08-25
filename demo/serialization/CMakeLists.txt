@@ -4,7 +4,7 @@ jfc_project(executable
     NAME "jfclua-demo-serialization"
     VERSION 1.0
     DESCRIPTION "jfc-lua: serialization"
-    C++_STANDARD 17
+    C++_STANDARD 20
     C_STANDARD 90
 
     SOURCE_LIST

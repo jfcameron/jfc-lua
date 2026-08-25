@@ -191,7 +191,8 @@ TEST_CASE("a call goes through the same guards as a run", "[call]") {
     }
 
     SECTION("a runaway function is stopped by the instruction budget") {
-        interpreter interp(interpreter_policy{0, 0, 100000});
+        interpreter interp(interpreter_policy{.MEMORY_BUDGET_IN_BYTES = 0,
+            .MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN = 0, .INSTRUCTION_BUDGET = 100000});
 
         auto env = interp.make_environment();
 

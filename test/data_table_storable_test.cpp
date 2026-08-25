@@ -26,7 +26,7 @@ TEST_CASE("a value that cannot be stored is refused, and named", "[storable]") {
             const auto read = env->read_data_table("t");
             FAIL("expected a throw");
         }
-        catch (const jfc::lua_exception &e) {
+        catch (const jfc::lua::exception &e) {
             INFO("message was: " << e.what());
             REQUIRE(std::string(e.what()).find(aExpected) != std::string::npos);
         }
@@ -53,7 +53,7 @@ TEST_CASE("a value that cannot be stored is refused, and named", "[storable]") {
 
             FAIL("expected a throw");
         }
-        catch (const jfc::lua_exception &e) {
+        catch (const jfc::lua::exception &e) {
             REQUIRE(std::string(e.what())
                 == "table: describe holds a function, which cannot be stored");
         }
@@ -76,13 +76,13 @@ TEST_CASE("a table that reaches itself is refused rather than followed", "[stora
     SECTION("directly") {
         REQUIRE_FALSE(env->run("t = {} t.self = t").has_value());
 
-        REQUIRE_THROWS_AS(env->read_data_table("t"), jfc::lua_exception);
+        REQUIRE_THROWS_AS(env->read_data_table("t"), jfc::lua::exception);
     }
 
     SECTION("or round a longer loop") {
         REQUIRE_FALSE(env->run("t = { a = {} } t.a.back = t").has_value());
 
-        REQUIRE_THROWS_AS(env->read_data_table("t"), jfc::lua_exception);
+        REQUIRE_THROWS_AS(env->read_data_table("t"), jfc::lua::exception);
     }
 
     SECTION("but the same table twice in different branches is not a loop") {
@@ -120,7 +120,7 @@ TEST_CASE("nesting past the limit is refused rather than exhausting the stack", 
 
             FAIL("expected a throw");
         }
-        catch (const jfc::lua_exception &e) {
+        catch (const jfc::lua::exception &e) {
             INFO("message was: " << e.what());
 
             REQUIRE(std::string(e.what()).find("nesting deeper than 128") != std::string::npos);
@@ -129,7 +129,7 @@ TEST_CASE("nesting past the limit is refused rather than exhausting the stack", 
 
     SECTION("just past it, where nothing else would object") {
         REQUIRE_FALSE(nest(129).has_value());
-        REQUIRE_THROWS_AS(env->read_data_table("t"), jfc::lua_exception);
+        REQUIRE_THROWS_AS(env->read_data_table("t"), jfc::lua::exception);
     }
 }
 
@@ -178,7 +178,7 @@ TEST_CASE("skip takes what can be stored and steps over the rest", "[storable]")
         REQUIRE_FALSE(env->run("t = {} local c = t for i = 1, 10000 do c.n = {} c = c.n end")
             .has_value());
 
-        REQUIRE_THROWS_AS(env->read_data_table("t", unsupported::skip), jfc::lua_exception);
+        REQUIRE_THROWS_AS(env->read_data_table("t", unsupported::skip), jfc::lua::exception);
     }
 
     SECTION("and it is lossy on purpose: writing it back writes a table without the function") {
@@ -205,7 +205,7 @@ TEST_CASE("reject is what happens unless skip is asked for", "[storable]") {
 
     REQUIRE_FALSE(env->run("t = { f = function() end }").has_value());
 
-    REQUIRE_THROWS_AS(env->read_data_table("t"), jfc::lua_exception);
-    REQUIRE_THROWS_AS(env->read_data_table("t", unsupported::reject), jfc::lua_exception);
+    REQUIRE_THROWS_AS(env->read_data_table("t"), jfc::lua::exception);
+    REQUIRE_THROWS_AS(env->read_data_table("t", unsupported::reject), jfc::lua::exception);
     REQUIRE_NOTHROW(env->read_data_table("t", unsupported::skip));
 }

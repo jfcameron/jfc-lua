@@ -1,6 +1,6 @@
 // © Joseph Cameron - All Rights Reserved
 
-#include <jfc/lua_reference.h>
+#include <jfc/lua/reference.h>
 
 #include <lua.hpp>
 
@@ -39,8 +39,7 @@ namespace jfc::lua {
 
     bool reference::is_function() const { return type_name() == "function"; }
 
-    bool reference::operator==(const reference &a) const
-    {
+    bool reference::operator==(const reference &a) const {
         if (m_pState != a.m_pState) return false;
 
         if (m_pReference == a.m_pReference) return true;
@@ -56,6 +55,4 @@ namespace jfc::lua {
 
         return same;
     }
-
-    bool reference::operator!=(const reference &a) const { return !(*this == a); }
 }

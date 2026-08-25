@@ -1,11 +1,11 @@
 // © Joseph Cameron - All Rights Reserved
 
-#include <jfc/lua_internal.h>
+#include <jfc/lua/internal.h>
 
-#include <jfc/lua_exception.h>
-#include <jfc/lua_key.h>
-#include <jfc/lua_path.h>
-#include <jfc/lua_data_table.h>
+#include <jfc/lua/exception.h>
+#include <jfc/lua/key.h>
+#include <jfc/lua/path.h>
+#include <jfc/lua/data_table.h>
 
 #include <algorithm>
 #include <cctype>
@@ -123,8 +123,6 @@ namespace jfc::lua {
 
     void data_table::set(const key &aKey, const char *const aValue) { _assign(aKey, std::string(aValue)); }
 
-    // Copied rather than shared, so that setting a table and then changing the original does not
-    // reach back into this one.
     void data_table::set(const key &aKey, const data_table &aValue) { 
         _assign(aKey, std::make_shared<data_table>(aValue)); 
     }
@@ -138,7 +136,6 @@ namespace jfc::lua {
 
                 if (!slot) { m_NumberFields.erase(aKeyValue); return; }
 
-                // A hole in the middle ends the run: what followed it is still there, but sparse now.
                 for (std::size_t i = *slot + 1; i < m_Array.size(); ++i)
                     m_NumberFields[static_cast<double>(i + 1)] = std::move(m_Array[i]);
 
@@ -167,8 +164,6 @@ namespace jfc::lua {
 
         out.reserve(size());
 
-        // Merged rather than concatenated: the map may hold keys below one, or fractional ones that
-        // fall between two slots, and number keys are documented as coming back ascending.
         auto sparse = m_NumberFields.begin();
 
         std::size_t dense = 0;
@@ -193,7 +188,7 @@ namespace jfc::lua {
     }
 
     namespace {
-        //! lua's reserved words, which cannot be a bare key however identifier shaped they look
+        //! lua's reserved words: these cannot be used as keys
         constexpr const char *RESERVED[] = {
             "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "if", "in",
             "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while"
@@ -276,7 +271,7 @@ namespace jfc::lua {
 
         private:
             [[noreturn]] void fail(const std::string &aWhy) const {
-                throw lua_exception("could not parse a data_table at character "
+                throw exception("could not parse a data_table at character "
                     + std::to_string(m_At) + ": " + aWhy);
             }
 
@@ -327,7 +322,6 @@ namespace jfc::lua {
                 return out;
             }
 
-            //! a bare or bracketed key
             [[nodiscard]] key read_key() {
                 if (peek() != '[') {
                     const auto start = m_At;
@@ -393,9 +387,6 @@ namespace jfc::lua {
 
         stream << "{";
 
-        // Driven by keys() rather than by walking the containers, so that only keys() and _find() know
-        // there are four of them -- and so that number keys come out merged and ascending whether they
-        // are in the dense run or the sparse map.
         const auto fields = a.keys();
 
         std::size_t remaining = fields.size();
@@ -408,11 +399,11 @@ namespace jfc::lua {
                 else if constexpr (std::is_same_v<value_type, bool>) stream << (value ? "true" : "false");
                 else if constexpr (std::is_same_v<value_type, std::string>) _write_quoted(stream, value);
                 else if constexpr (std::is_same_v<value_type, std::shared_ptr<data_table>>) {
-                    if (!value) throw lua_exception("table operator<<: null subtable");
+                    if (!value) throw exception("table operator<<: null subtable");
 
                     stream << *value;
                 }
-                else throw lua_exception("table operator<<: unsupported type");
+                else throw exception("table operator<<: unsupported type");
             }, aValue);
         };
 
@@ -476,11 +467,11 @@ namespace jfc::lua {
                 else if constexpr (std::is_same_v<value_type, std::string>) lua_pushstring(L, value.c_str());
                 else if constexpr (std::is_same_v<value_type, std::shared_ptr<data_table>>)
                 {
-                    if (!value) throw lua_exception("data_table::push_to_lua_state: null subtable");
+                    if (!value) throw exception("data_table::push_to_lua_state: null subtable");
 
                     value->push_to_lua_state(L);
                 }
-                else throw lua_exception("data_table::push_to_lua_state: unsupported value type");
+                else throw exception("data_table::push_to_lua_state: unsupported value type");
 
                 aSetter();
             }, aValue);
@@ -533,7 +524,7 @@ namespace jfc::lua {
         if (segments.empty()) where << "the table";
         else where << path(segments);
 
-        throw lua_exception("table: " + where.str() + " " + aWhy);
+        throw exception("table: " + where.str() + " " + aWhy);
     }
 
     std::optional<key> data_table::_to_key(lua_State *L, const int aIndex, const read_context &aContext) {
@@ -587,19 +578,14 @@ namespace jfc::lua {
     }
 
     void data_table::_read(lua_State *L, const int aIndex, read_context &aContext) {
-        if (!lua_istable(L, aIndex)) throw lua_exception("index must point to a table");
+        if (!lua_istable(L, aIndex)) throw exception("index must point to a table");
 
-        // Depth is refused whatever the policy says: skipping is about what a value *is*, and this is
-        // about how much c++ stack is left.
         if (aContext.ancestors.size() >= MAXIMUM_DEPTH)
-            throw lua_exception("table: nesting deeper than " + std::to_string(MAXIMUM_DEPTH)
+            throw exception("table: nesting deeper than " + std::to_string(MAXIMUM_DEPTH)
                 + " levels cannot be stored");
 
-        // Each level holds the table, the key and the value while it descends, and lua_pushvalue does
-        // not make room for itself. Luajit tolerates the omission; puc lua aborts, which is what a
-        // sixty four deep read did on that backend before this was here.
         if (!lua_checkstack(L, 5))
-            throw lua_exception("table: the lua stack cannot grow enough to read this table");
+            throw exception("table: the lua stack cannot grow enough to read this table");
 
         aContext.ancestors.push_back(lua_topointer(L, aIndex));
 

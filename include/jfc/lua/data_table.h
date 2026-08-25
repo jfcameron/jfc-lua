@@ -3,8 +3,8 @@
 #ifndef JFC_LUA_DATA_TABLE_H
 #define JFC_LUA_DATA_TABLE_H
 
-#include <jfc/lua_key.h>
-#include <jfc/lua_types.h>
+#include <jfc/lua/key.h>
+#include <jfc/lua/types.h>
 
 #include <array>
 #include <cstddef>
@@ -40,7 +40,7 @@ namespace jfc::lua
 
         /// \brief construct a table from an existing table within a lua state
         ///
-        /// \warn throws lua_exception when the lua table holds something that cannot be stored and
+        /// \warn throws exception when the lua table holds something that cannot be stored and
         /// aPolicy is reject, when a key is of an unstorable kind, when the table reaches itself, or
         /// when it nests deeper than MAXIMUM_DEPTH.
         data_table(lua_State *L, int aIndex, const unsupported aPolicy = unsupported::reject);
@@ -64,7 +64,7 @@ namespace jfc::lua
 
         /// \brief read back what to_string produced, **without running it as lua**
         ///
-        /// \warn throws lua_exception if it does not parse
+        /// \warn throws exception if it does not parse
         [[nodiscard]] static data_table from_string(const std::string &aText);
 
         /// \brief the number at aKey, or nothing if there is no such key or it holds another type

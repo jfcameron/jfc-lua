@@ -33,10 +33,10 @@ namespace {
 int main()
 {
     interpreter interp(interpreter_policy{
-        64u << 20,   // MEMORY_BUDGET_IN_BYTES
-        8u << 20,    // MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN
-        20000000,    // INSTRUCTION_BUDGET
-        [](const std::size_t aExecuted) // ON_INSTRUCTION_BUDGET_EXHAUSTED
+        .MEMORY_BUDGET_IN_BYTES = 64u << 20,
+        .MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN = 8u << 20,
+        .INSTRUCTION_BUDGET = 20000000,
+        .ON_INSTRUCTION_BUDGET_EXHAUSTED = [](const std::size_t aExecuted)
         {
             std::cout << "    [limit] a script has run " << aExecuted
                 << " instructions without finishing -- stopping it\n";
@@ -45,8 +45,8 @@ int main()
         }});
 
     auto npc = interp.make_environment(environment_policy{
-        standard_library::safe,   // LIBRARY
-        400000});                 // INSTRUCTION_BUDGET
+        .LIBRARY = standard_library::safe,
+        .INSTRUCTION_BUDGET = 400000});
 
     auto bystander = interp.make_environment();
 
@@ -73,10 +73,9 @@ int main()
 
     heading("what the limits do and do not cover");
 
-    std::cout << "  memory  bounds the lua heap, not the process: luajit compiles through its own\n"
+    std::cout << "  memory  bounds the lua heap, not the process. luajit compiles through its own\n"
                  "          allocator, so a trace is invisible to the ceiling\n"
-                 "  time    counts vm instructions, so a long call into c -- string.rep, a pattern\n"
-                 "          match -- runs to completion whatever the budget says\n"
+                 "  time    counts vm instructions\n"
                  "  neither is per environment: they share one lua state, so the figures bound the\n"
                  "          interpreter and the per-run one says who is at fault\n";
 

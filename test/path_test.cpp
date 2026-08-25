@@ -194,7 +194,7 @@ TEST_CASE("a malformed path is a mistake in the caller, and says so", "[path]") 
     for (const auto *const bad : malformed) {
         INFO("path \"" << bad << "\"");
 
-        REQUIRE_THROWS_AS(path(bad), jfc::lua_exception);
+        REQUIRE_THROWS_AS(path(bad), jfc::lua::exception);
     }
 }
 
@@ -215,7 +215,7 @@ TEST_CASE("the reason given is the specific one", "[path]") {
 
             FAIL("expected a throw");
         }
-        catch (const jfc::lua_exception &e) {
+        catch (const jfc::lua::exception &e) {
             REQUIRE(std::string(e.what()).find(c.expected) != std::string::npos);
         }
     }
@@ -227,7 +227,7 @@ TEST_CASE("the message names the path and the reason", "[path]") {
 
         FAIL("expected a throw");
     }
-    catch (const jfc::lua_exception &e) {
+    catch (const jfc::lua::exception &e) {
         const std::string what = e.what();
 
         REQUIRE(what.find("npcs[oops]") != std::string::npos);

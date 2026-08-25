@@ -233,7 +233,7 @@ int main()
 
         std::cout << "  hud serialised unexpectedly\n";
     }
-    catch (const jfc::lua_exception &e) { std::cout << "  " << e.what() << "\n"; }
+    catch (const jfc::lua::exception &e) { std::cout << "  " << e.what() << "\n"; }
 
     heading("and when both sides let go");
 

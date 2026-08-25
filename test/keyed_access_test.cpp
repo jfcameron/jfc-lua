@@ -180,9 +180,9 @@ TEST_CASE("an unparseable path is reported rather than read as absent", "[keys]"
 
     auto env = interp.make_environment();
 
-    REQUIRE_THROWS_AS(env->read_number("a["), jfc::lua_exception);
-    REQUIRE_THROWS_AS(env->read_string("a[nope]"), jfc::lua_exception);
-    REQUIRE_THROWS_AS(env->write("a..b", 1.0), jfc::lua_exception);
+    REQUIRE_THROWS_AS(env->read_number("a["), jfc::lua::exception);
+    REQUIRE_THROWS_AS(env->read_string("a[nope]"), jfc::lua::exception);
+    REQUIRE_THROWS_AS(env->write("a..b", 1.0), jfc::lua::exception);
 
     REQUIRE_FALSE(env->run("ok = 1").has_value());
     REQUIRE(env->read_number("ok") == 1);

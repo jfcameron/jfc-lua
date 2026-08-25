@@ -3,10 +3,10 @@
 #ifndef JFC_LUA_REFERENCE_H
 #define JFC_LUA_REFERENCE_H
 
-#include <jfc/lua_data_table.h>
-#include <jfc/lua_path.h>
-#include <jfc/lua_types.h>
-#include <jfc/lua_userdata.h>
+#include <jfc/lua/data_table.h>
+#include <jfc/lua/path.h>
+#include <jfc/lua/types.h>
+#include <jfc/lua/userdata.h>
 
 #include <cstddef>
 #include <memory>
@@ -47,7 +47,6 @@ namespace jfc::lua
         [[nodiscard]] error_type call(const value_list_type &aArguments = {});
 
         [[nodiscard]] bool operator==(const reference &a) const;
-        [[nodiscard]] bool operator!=(const reference &a) const;
 
         /// \brief writes a [string, boolean] through this handle
         void write(const path &aPath, const bool aValue);

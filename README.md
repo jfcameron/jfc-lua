@@ -1,5 +1,4 @@
-[![Build Status](https://travis-ci.org/jfcameron/jfc-lua.svg?branch=master)](https://travis-ci.org/jfcameron/jfc-lua) [![Documentation](https://img.shields.io/badge/documentation-doxygen-blue.svg)](https://jfcameron.github.io/jfc-lua/)
-
 ## jfc-lua
 
-c++ lua wrapper. extremely early days
+c++ lua library. strong separation between interface and implementation. via cmake flags users can select either the standard lua implementation or jit. c++20 conforming
+

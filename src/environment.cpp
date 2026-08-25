@@ -1,14 +1,14 @@
 // © Joseph Cameron - All Rights Reserved
 
-#include <jfc/lua_internal.h>
+#include <jfc/lua/internal.h>
 
-#include <jfc/lua_exception.h>
-#include <jfc/lua_environment.h>
-#include <jfc/lua_key.h>
-#include <jfc/lua_path.h>
-#include <jfc/lua_reference.h>
-#include <jfc/lua_userdata.h>
-#include <jfc/lua_data_table.h>
+#include <jfc/lua/exception.h>
+#include <jfc/lua/environment.h>
+#include <jfc/lua/key.h>
+#include <jfc/lua/path.h>
+#include <jfc/lua/reference.h>
+#include <jfc/lua/userdata.h>
+#include <jfc/lua/data_table.h>
 
 #include <cstdio>
 #include <functional>
@@ -274,7 +274,6 @@ namespace {
         [[nodiscard]] interpreter_limits *limits() const { return m_pLimits; }
     };
 
-
     /// \brief the string at aIndex, or nothing if lua has none to give
     [[nodiscard]] std::optional<std::string> _to_string(lua_State *const L, const int aIndex) {
         const auto *const text = lua_tostring(L, aIndex);
@@ -457,7 +456,6 @@ namespace jfc::lua {
             if (!lua_checkstack(L, static_cast<int>(aArguments.size()) + 2))
                 return "the lua stack cannot grow enough to make this call";
 
-            // Where the results will begin once lua_pcall has replaced the function and its arguments.
             const int base = lua_gettop(L);
 
             for (const auto &argument : aArguments) _push_param(L, argument);
@@ -589,7 +587,7 @@ namespace jfc::lua {
                 for (int i(1); i <= lua_gettop(p); ++i) {
                     if (_to_param(p, i, args)) continue;
 
-                    throw lua_exception("argument " + std::to_string(i) + " is a "
+                    throw exception("argument " + std::to_string(i) + " is a "
                         + lua_typename(p, lua_type(p, i)) + ", which cannot cross into c++");
                 }
 

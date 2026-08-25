@@ -3,7 +3,7 @@
 #ifndef JFC_LUA_KEY_H
 #define JFC_LUA_KEY_H
 
-#include <jfc/lua_types.h>
+#include <jfc/lua/types.h>
 
 #include <string>
 #include <type_traits>
@@ -45,7 +45,6 @@ namespace jfc::lua
         [[nodiscard]] const key_type &value() const { return m_Value; }
 
         [[nodiscard]] bool operator==(const key &a) const { return m_Value == a.m_Value; }
-        [[nodiscard]] bool operator!=(const key &a) const { return m_Value != a.m_Value; }
 
     private:
         key_type m_Value;

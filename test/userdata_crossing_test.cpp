@@ -114,7 +114,7 @@ TEST_CASE("a script may pass a handle about without being able to open it", "[us
     SECTION("and it cannot be stored in a data_table, which is the serialisable set") {
         REQUIRE_FALSE(env->run("t = { thing = a }").has_value());
 
-        REQUIRE_THROWS_AS(env->read_data_table("t"), jfc::lua_exception);
+        REQUIRE_THROWS_AS(env->read_data_table("t"), jfc::lua::exception);
 
         const auto skipped = env->read_data_table("t", unsupported::skip);
 

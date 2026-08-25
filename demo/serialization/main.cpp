@@ -24,7 +24,7 @@ record = {
     hp = hp,
     inventory = inventory,
     position = position,
-    describe = describe   -- a method: not something that can be written down
+    describe = describe   -- function,  which is a type that cannot be serialized
 }
 )V0G0N");
 
@@ -55,7 +55,7 @@ int main()
 
         std::cout << "  unexpectedly succeeded\n";
     }
-    catch (const jfc::lua_exception &e) { std::cout << "  " << e.what() << "\n"; }
+    catch (const jfc::lua::exception &e) { std::cout << "  " << e.what() << "\n"; }
 
     heading("so is a table that contains itself");
 
@@ -67,7 +67,7 @@ int main()
 
         std::cout << "  unexpectedly succeeded\n";
     }
-    catch (const jfc::lua_exception &e) { std::cout << "  " << e.what() << "\n"; }
+    catch (const jfc::lua::exception &e) { std::cout << "  " << e.what() << "\n"; }
 
     heading("asking for what can be stored instead");
 
@@ -167,3 +167,4 @@ int main()
 
     return EXIT_SUCCESS;
 }
+

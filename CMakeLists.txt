@@ -63,7 +63,7 @@ jfc_project(library
     NAME "jfclua"
     VERSION 0.0
     DESCRIPTION "c++ lua wrapper"
-    C++_STANDARD 17
+    C++_STANDARD 20
     C_STANDARD 90
     TYPE STATIC
 
@@ -75,12 +75,12 @@ jfc_project(library
         ${Lua_INCLUDE_DIR}
 
     SOURCE_LIST
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/lua_environment.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/lua_exception.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/lua_interpreter.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/lua_path.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/lua_reference.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/lua_data_table.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/environment.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/exception.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/path.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/reference.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/data_table.cpp
 
     LIBRARIES
         "${Lua_LIBRARIES}"

@@ -279,10 +279,10 @@ TEST_CASE("calling a reference reports what went wrong", "[reference][call]") {
         int aborts = 0;
 
         interpreter budgeted(interpreter_policy{
-            0,                                   // MEMORY_BUDGET_IN_BYTES
-            0,                                   // MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN
-            200000,                              // INSTRUCTION_BUDGET
-            [&](const std::size_t)               // ON_INSTRUCTION_BUDGET_EXHAUSTED
+            .MEMORY_BUDGET_IN_BYTES = 0,
+            .MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN = 0,
+            .INSTRUCTION_BUDGET = 200000,
+            .ON_INSTRUCTION_BUDGET_EXHAUSTED = [&](const std::size_t)
             {
                 ++aborts;
 
@@ -307,10 +307,10 @@ TEST_CASE("calling a reference reports what went wrong", "[reference][call]") {
         bool reacted = false;
 
         interpreter budgeted(interpreter_policy{
-            0,                                   // MEMORY_BUDGET_IN_BYTES
-            0,                                   // MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN
-            100000,                              // INSTRUCTION_BUDGET
-            [&](const std::size_t)               // ON_INSTRUCTION_BUDGET_EXHAUSTED
+            .MEMORY_BUDGET_IN_BYTES = 0,
+            .MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN = 0,
+            .INSTRUCTION_BUDGET = 100000,
+            .ON_INSTRUCTION_BUDGET_EXHAUSTED = [&](const std::size_t)
             {
                 reacted = true;
                 return false;
