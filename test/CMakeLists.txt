@@ -23,9 +23,6 @@ jfc_add_tests(
         "${CMAKE_CURRENT_LIST_DIR}/userdata_crossing_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/userdata_test.cpp"
 
-    INCLUDE_DIRECTORIES
-        "${${PROJECT_NAME}_INCLUDE_DIRECTORIES}"
-
     LIBRARIES
-        "${${PROJECT_NAME}_LIBRARIES}")
-
+        jfclua
+)

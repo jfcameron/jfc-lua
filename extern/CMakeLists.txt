@@ -1,8 +1,3 @@
 # © Joseph Cameron - All Rights Reserved
 
-set(dependencies
-    "Lua"
-)
-
-jfc_add_dependencies(${dependencies})
-
+include("${CMAKE_CURRENT_LIST_DIR}/Lua.cmake")

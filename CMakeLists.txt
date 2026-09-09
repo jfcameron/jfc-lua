@@ -2,7 +2,9 @@
 
 cmake_minimum_required(VERSION 3.9 FATAL_ERROR)
 
-project(null)
+project(jfclua
+    VERSION 0.0
+    DESCRIPTION "c++ lua wrapper")
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/jfc-cmake/jfclib.cmake")
 
@@ -59,35 +61,38 @@ else()
     endforeach()
 endif()
 
-jfc_project(library
-    NAME "jfclua"
-    VERSION 0.0
-    DESCRIPTION "c++ lua wrapper"
-    C++_STANDARD 20
-    C_STANDARD 90
-    TYPE STATIC
+if (NOT TARGET jfclua)
 
-    PUBLIC_INCLUDE_DIRECTORIES
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-
-    PRIVATE_INCLUDE_DIRECTORIES
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/include
-        ${Lua_INCLUDE_DIR}
-
-    SOURCE_LIST
+    add_library(jfclua STATIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src/environment.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/exception.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/path.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/reference.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/data_table.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/data_table.cpp)
 
-    LIBRARIES
-        "${Lua_LIBRARIES}"
+    add_library(jfc::lua ALIAS jfclua)
 
-    DEPENDENCIES
-        "${JFC_LUA_TARGET}"
-)
+    set_target_properties(jfclua PROPERTIES EXPORT_NAME lua)
+
+    set_target_properties(jfclua PROPERTIES PREFIX "lib")
+
+    jfc_generate_cmake_header()
+
+    target_include_directories(jfclua
+        PUBLIC
+            "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+            "$<INSTALL_INTERFACE:include>"
+        PRIVATE
+            "${PROJECT_BINARY_DIR}/generated_include/"
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/include
+        )
+
+    target_compile_features(jfclua PUBLIC cxx_std_20)
+
+    target_link_libraries(jfclua PUBLIC ${JFC_LUA_TARGET})
+
+endif()
 
 if (JFC_BUILD_DEMO)
     add_subdirectory(demo)
@@ -101,3 +106,6 @@ if (JFC_BUILD_DOCS)
     add_subdirectory(docs)
 endif()
 
+if (JFC_LUA_TARGET AND TARGET ${JFC_LUA_TARGET})
+    add_dependencies(jfclua ${JFC_LUA_TARGET})
+endif()

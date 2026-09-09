@@ -3,14 +3,12 @@
 if (JFC_LUA_BACKEND STREQUAL "luajit")
     add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/LuaJIT")
 
-    jfc_set_dependency_symbols(
-        INCLUDE_PATHS
-            "${CMAKE_CURRENT_LIST_DIR}/LuaJIT/src"
-            "${CMAKE_CURRENT_BINARY_DIR}/LuaJIT/src"
+    target_include_directories(libluajit PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/LuaJIT/src>"
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/LuaJIT/src>")
 
-        LIBRARIES
-            "libluajit;${CMAKE_DL_LIBS}"
-    )
+    set_property(TARGET libluajit APPEND PROPERTY
+        INTERFACE_LINK_LIBRARIES ${CMAKE_DL_LIBS})
 
     set(JFC_LUA_TARGET "libluajit" CACHE INTERNAL "the cmake target the lua backend builds")
 
@@ -44,21 +42,15 @@ elseif (JFC_LUA_BACKEND STREQUAL "lua51")
 "#include \"lauxlib.h\"\n"
 "}\n")
 
-    jfc_set_dependency_symbols(
-        INCLUDE_PATHS
-            "${_lua_root}"
-            "${CMAKE_CURRENT_BINARY_DIR}/lua-hpp"
+    target_include_directories(liblua PUBLIC
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/lua-hpp>")
 
-        LIBRARIES
-            "liblua;${CMAKE_DL_LIBS};m"
-    )
+    target_link_libraries(liblua PUBLIC ${CMAKE_DL_LIBS} m)
 
     set(JFC_LUA_TARGET "liblua" CACHE INTERNAL "the cmake target the lua backend builds")
 
 else()
-
     message(FATAL_ERROR
         "JFC_LUA_BACKEND is \"${JFC_LUA_BACKEND}\" but must be one of: luajit, lua51")
-
 endif()
 

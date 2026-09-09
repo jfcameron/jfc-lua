@@ -28,7 +28,7 @@ namespace jfc::lua
         explicit path(std::vector<key> aSegments);
 
         /// \brief parse the string form
-        /// \warn throws exception if it does not parse
+        /// \warning throws exception if it does not parse
         path(const std::string &aPathString);
 
         /// \brief parse the string form

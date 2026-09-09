@@ -139,7 +139,7 @@ namespace jfc::lua {
         
         /// \brief construct an interpreter
         ///
-        /// \warn throws if the lua state cannot be created
+        /// \warning throws if the lua state cannot be created
         interpreter(interpreter_policy aPolicy = {});
 
     private:

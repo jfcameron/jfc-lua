@@ -97,6 +97,16 @@
       "cacheVariables": {
         "CMAKE_CXX_FLAGS": "/W4 /EHsc /permissive-"
       }
+    },
+    {
+      "name": "linux-docs",
+      "displayName": "Linux / documentation",
+      "inherits": "linux-gcc",
+      "cacheVariables": {
+        "JFC_BUILD_DOCS": "ON",
+        "JFC_BUILD_TESTS": "OFF",
+        "JFC_BUILD_DEMO": "OFF"
+      }
     }
   ],
   "buildPresets": [

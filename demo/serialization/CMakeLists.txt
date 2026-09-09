@@ -1,21 +1,10 @@
 # © Joseph Cameron - All Rights Reserved
 
-jfc_project(executable
-    NAME "jfclua-demo-serialization"
-    VERSION 1.0
-    DESCRIPTION "jfc-lua: serialization"
-    C++_STANDARD 20
-    C_STANDARD 90
+project(jfclua-demo-serialization)
 
-    SOURCE_LIST
-        ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
+add_executable(jfclua-demo-serialization
+    ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp)
 
-    PRIVATE_INCLUDE_DIRECTORIES
-        "${jfclua_INCLUDE_DIRECTORIES}"
+target_link_libraries(jfclua-demo-serialization PRIVATE jfclua)
 
-    LIBRARIES
-        "${jfclua_LIBRARIES}"
-
-    DEPENDENCIES
-        "jfclua"
-)
+target_compile_features(jfclua-demo-serialization PRIVATE cxx_std_20)

@@ -20,11 +20,8 @@ namespace jfc::lua
 {
     /// \brief what to do about a lua value this cannot store
     enum class unsupported {
-        /// \brief a value that cannot be stored is an error
-        reject,
-
-        /// \brief keep what can be stored and step over the rest
-        skip
+        reject, ///< a value that cannot be stored is an error
+        skip    ///< keep what can be stored and step over the rest
     };
 
     /// \brief a lua table, restricted to what can be stored
@@ -40,7 +37,7 @@ namespace jfc::lua
 
         /// \brief construct a table from an existing table within a lua state
         ///
-        /// \warn throws exception when the lua table holds something that cannot be stored and
+        /// \warning throws exception when the lua table holds something that cannot be stored and
         /// aPolicy is reject, when a key is of an unstorable kind, when the table reaches itself, or
         /// when it nests deeper than MAXIMUM_DEPTH.
         data_table(lua_State *L, int aIndex, const unsupported aPolicy = unsupported::reject);
@@ -50,7 +47,6 @@ namespace jfc::lua
         /// a recursive table read limit needs to exist to prevent
         /// excessively nested table structures causing a stack overflow
         /// when the program tries to serialize it
-        /// TODO: this should be a library policy rather than class constant
         static constexpr std::size_t MAXIMUM_DEPTH = 128;
 
         /// \brief construct a table with no content
@@ -64,7 +60,7 @@ namespace jfc::lua
 
         /// \brief read back what to_string produced, **without running it as lua**
         ///
-        /// \warn throws exception if it does not parse
+        /// \warning throws exception if it does not parse
         [[nodiscard]] static data_table from_string(const std::string &aText);
 
         /// \brief the number at aKey, or nothing if there is no such key or it holds another type

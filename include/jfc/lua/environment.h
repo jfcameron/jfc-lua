@@ -28,7 +28,7 @@ namespace jfc::lua
 
         /// \brief everything luaL_openlibs opened
         ///
-        /// \warn includes debug, whose getregistry() function can be used to access every other environment 
+        /// \warning includes debug, whose getregistry() function can be used to access every other environment 
         /// in the same lua context as well as run commands on the system
         unrestricted
     };
