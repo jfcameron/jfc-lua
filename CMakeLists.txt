@@ -77,7 +77,7 @@ if (NOT TARGET jfclua)
 
     set_target_properties(jfclua PROPERTIES PREFIX "lib")
 
-    jfc_generate_cmake_header()
+    jfc_generate_build_info()
 
     target_include_directories(jfclua
         PUBLIC
