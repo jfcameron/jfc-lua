@@ -134,6 +134,7 @@ namespace jfc::lua
     private:
         friend class environment;
         friend class interpreter;
+        friend class coroutine;
 
         std::shared_ptr<lua_State> m_pState;
 

@@ -3,6 +3,7 @@
 #ifndef JFC_LUA_ENVIRONMENT_H
 #define JFC_LUA_ENVIRONMENT_H
 
+#include <jfc/lua/coroutine.h>
 #include <jfc/lua/path.h>
 #include <jfc/lua/reference.h>
 #include <jfc/lua/data_table.h>
@@ -63,6 +64,12 @@ namespace jfc::lua
         /// \brief registers a closure (c++ lambda with captured data) into this environment alone
         void register_function(const path &aName, closure_type a);
 
+        /// \brief registers a closure that suspends the coroutine calling it
+        void register_yielding_function(const path &aName, closure_type a);
+
+        /// \brief the function at aFunction, ready to run as a coroutine against this environment
+        [[nodiscard]] std::optional<coroutine> make_coroutine(const path &aFunction);
+
         /// \brief checks for basic syntax errors.
         ///
         /// This is not required to called before running a script, a typical use case
@@ -81,6 +88,9 @@ namespace jfc::lua
 
         environment(std::shared_ptr<lua_State> aState, const int aRootReference,
             const std::optional<std::size_t> aInstructionBudget);
+
+        //! registers aClosure at aName, yielding its results if aYields. \see register_function
+        void _register(const path &aName, closure_type aClosure, bool aYields);
 
         std::optional<std::size_t> m_InstructionBudget;
     };

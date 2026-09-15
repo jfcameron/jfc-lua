@@ -64,11 +64,13 @@ endif()
 if (NOT TARGET jfclua)
 
     add_library(jfclua STATIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/coroutine.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/environment.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/exception.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/path.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/reference.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/userdata_box.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/data_table.cpp)
 
     add_library(jfc::lua ALIAS jfclua)

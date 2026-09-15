@@ -6,6 +6,7 @@ jfc_add_tests(
     TEST_SOURCE_FILES
         "${CMAKE_CURRENT_LIST_DIR}/array_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/call_test.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/coroutine_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/closure_boundary_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/data_table_access_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/data_table_dense_test.cpp"
@@ -20,6 +21,7 @@ jfc_add_tests(
         "${CMAKE_CURRENT_LIST_DIR}/reference_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/stack_balance_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/userdata_crossing_test.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/userdata_methods_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/userdata_test.cpp"
 
     LIBRARIES

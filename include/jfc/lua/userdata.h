@@ -58,6 +58,9 @@ namespace jfc::lua
         /// \brief an identity for the bound type, comparable but not readable
         [[nodiscard]] const void *type_key() const { return m_TypeKey; }
 
+        /// \brief the object's address
+        [[nodiscard]] const void *address() const { return m_Object.get(); }
+
         /// \brief whether both refer to the same object
         [[nodiscard]] bool operator==(const userdata &a) const
             { return m_Object == a.m_Object && m_TypeKey == a.m_TypeKey; }

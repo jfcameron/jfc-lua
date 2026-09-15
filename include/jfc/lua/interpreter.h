@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <utility>
 #include <optional>
 #include <string>
 #include <vector>
@@ -131,6 +132,41 @@ namespace jfc::lua {
         /// \brief registers a closure (c++ lambda with captured data)
         void register_function(const path &aName, closure_type a);
 
+        /// \brief a method a script calls on an object_type: `object:name(arguments)`
+        template <typename object_type>
+        using method_type = std::function<value_list_type(object_type &, value_list_type)>;
+
+        //! a method that has not been told its object's type yet: given the object as a userdata
+        using untyped_method_type = std::function<value_list_type(const userdata &, value_list_type)>;
+
+        /// \brief give object_type methods
+        template <typename object_type>
+        void register_type(
+            std::string aName,
+            std::vector<std::pair<std::string, 
+            method_type<object_type>>> aMethods
+        ) {
+            std::vector<std::pair<std::string, untyped_method_type>> untyped;
+
+            untyped.reserve(aMethods.size());
+
+            for (auto &[name, method] : aMethods)
+                untyped.emplace_back(name,
+                    [method = std::move(method)](const userdata &aSelf, value_list_type aArguments) {
+                        return method(*aSelf.get<object_type>(), std::move(aArguments));
+                    });
+
+            _register_type(std::move(aName), userdata::make(std::shared_ptr<object_type>()).type_key(),
+                std::move(untyped));
+        }
+
+        /// \brief hold a reference to a userdata directly in order to prevent it from going out of scope
+        [[nodiscard]] reference hold(const userdata &aObject);
+
+        template <typename object_type>
+        [[nodiscard]] reference hold(const std::shared_ptr<object_type> &aObject)
+            { return hold(userdata::make(aObject)); }
+
         /// \brief checks for basic synatx errors. 
         [[nodiscard]] error_type validate_syntax(const std::string &aLuaScript) const;
         
@@ -143,6 +179,9 @@ namespace jfc::lua {
         interpreter(interpreter_policy aPolicy = {});
 
     private:
+        void _register_type(std::string aName, const void *aTypeKey,
+            std::vector<std::pair<std::string, untyped_method_type>> aMethods);
+
        [[nodiscard]] std::optional<userdata> _read_userdata(const path &aPath) const;
 
         std::shared_ptr<interpreter_limits> m_pLimits;

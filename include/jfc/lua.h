@@ -3,6 +3,7 @@
 #ifndef JFC_LUA_H
 #define JFC_LUA_H
 
+#include <jfc/lua/coroutine.h>
 #include <jfc/lua/data_table.h>
 #include <jfc/lua/environment.h>
 #include <jfc/lua/exception.h>
