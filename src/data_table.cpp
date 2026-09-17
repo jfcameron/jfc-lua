@@ -188,7 +188,6 @@ namespace jfc::lua {
     }
 
     namespace {
-        //! lua's reserved words: these cannot be used as keys
         constexpr const char *RESERVED[] = {
             "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "if", "in",
             "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while"
@@ -257,7 +256,13 @@ namespace jfc::lua {
 
                     read_value_into(out, field);
 
-                    if (peek() == ',') { ++m_At; continue; }
+                    if (peek() == ',') {
+                        ++m_At;
+
+                        if (peek() == '}') break;
+
+                        continue;
+                    }
 
                     break;
                 }
@@ -267,7 +272,7 @@ namespace jfc::lua {
                 return out;
             }
 
-            void expect_end() { if (m_At != m_Text.size()) fail("trailing characters"); }
+            void expect_end() { if (peek() != '\0') fail("trailing characters"); }
 
         private:
             [[noreturn]] void fail(const std::string &aWhy) const {
@@ -275,7 +280,12 @@ namespace jfc::lua {
                     + std::to_string(m_At) + ": " + aWhy);
             }
 
-            [[nodiscard]] char peek() const { return m_At < m_Text.size() ? m_Text[m_At] : '\0'; }
+            [[nodiscard]] char peek() {
+                while (m_At < m_Text.size() && std::isspace(static_cast<unsigned char>(m_Text[m_At])))
+                    ++m_At;
+
+                return m_At < m_Text.size() ? m_Text[m_At] : '\0';
+            }
 
             void expect(const char aCharacter) {
                 if (peek() != aCharacter) fail(std::string("expected '") + aCharacter + "'");

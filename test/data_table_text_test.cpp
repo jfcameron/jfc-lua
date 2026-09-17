@@ -245,7 +245,6 @@ TEST_CASE("from_string refuses what it cannot read, rather than guessing", "[tex
         "{a=}",                
         "{=1}",                
         "{a=1",                
-        "{a=1,}",              
         "{1,2,3}",             
         "{a=nil}",             
         "{a=\"unterminated}",  
@@ -259,6 +258,8 @@ TEST_CASE("from_string refuses what it cannot read, rather than guessing", "[tex
 
         REQUIRE_THROWS_AS(data_table::from_string(text), jfc::lua::exception);
     }
+
+    REQUIRE(data_table::from_string("{a=1,}").get_number("a") == 1);
 }
 
 TEST_CASE("a tampered save is a parse error, not a script", "[text]") {
@@ -339,5 +340,46 @@ TEST_CASE("serialisation is deterministic", "[text][order]") {
         outer.set("aaa", 2.0);
 
         REQUIRE(outer.to_string() == "{aaa=2,inner={first=1,second=2},zzz=1}");
+    }
+}
+
+TEST_CASE("**a table reindented by hand still reads**", "[data_table][text]") {
+    const std::string pretty = R"(
+{
+    ["format"] = 1,
+    ["kits"] = {
+        ["room"] = ">= 2",
+    },
+    ["deep"] = { ["list"] = { [1] = true, [2] = false, }, },
+}
+)";
+
+    const auto read = data_table::from_string(pretty);
+
+    REQUIRE(read.get_number("format") == 1);
+    REQUIRE(read.get_data_table("kits")->get_string("room") == ">= 2");
+    REQUIRE(read.get_data_table("deep")->get_data_table("list")->get_boolean(1.0) == true);
+
+    SECTION("**and what it says is what it said before it was tidied**") {
+        REQUIRE(data_table::from_string(read.to_string()).to_string() == read.to_string());
+    }
+
+    SECTION("**spaces inside a string are the string's, and are left alone**") {
+        const auto spaced = data_table::from_string(R"({ ["words"] = "  two  spaces  ", })");
+
+        REQUIRE(spaced.get_string("words") == "  two  spaces  ");
+    }
+
+    SECTION("**tabs and newlines are blanks like any other**") {
+        REQUIRE(data_table::from_string("{\n\t[\"a\"]\t=\t1,\r\n}").get_number("a") == 1);
+    }
+
+    SECTION("**and what is not whitespace is still refused**") {
+        for (const std::string bad : {"{ [\"a\"] = 1, } trailing", "{ [\"a\"] = os.time(), }",
+                 "{ -- a comment\n [\"a\"] = 1, }", "{ [\"a\"] 1, }", "{ [\"a\"] = , }"}) {
+            INFO(bad);
+
+            REQUIRE_THROWS(data_table::from_string(bad));
+        }
     }
 }
