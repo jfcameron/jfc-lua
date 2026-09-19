@@ -245,7 +245,6 @@ TEST_CASE("from_string refuses what it cannot read, rather than guessing", "[tex
         "{a=}",                
         "{=1}",                
         "{a=1",                
-        "{1,2,3}",             
         "{a=nil}",             
         "{a=\"unterminated}",  
         "{a=1} trailing",      
@@ -260,6 +259,8 @@ TEST_CASE("from_string refuses what it cannot read, rather than guessing", "[tex
     }
 
     REQUIRE(data_table::from_string("{a=1,}").get_number("a") == 1);
+
+    REQUIRE(data_table::from_string("{1,2,3}").get_number(3) == 3);
 }
 
 TEST_CASE("a tampered save is a parse error, not a script", "[text]") {
@@ -376,10 +377,78 @@ TEST_CASE("**a table reindented by hand still reads**", "[data_table][text]") {
 
     SECTION("**and what is not whitespace is still refused**") {
         for (const std::string bad : {"{ [\"a\"] = 1, } trailing", "{ [\"a\"] = os.time(), }",
-                 "{ -- a comment\n [\"a\"] = 1, }", "{ [\"a\"] 1, }", "{ [\"a\"] = , }"}) {
+                 "{ [\"a\"] 1, }", "{ [\"a\"] = , }"}) {
             INFO(bad);
 
             REQUIRE_THROWS(data_table::from_string(bad));
         }
+
+        REQUIRE(data_table::from_string("{ -- a comment\n [\"a\"] = 1, }").get_number("a") == 1);
+    }
+}
+
+TEST_CASE("a list reads as lua writes one: numbered from one, among named fields", "[data_table][text]") {
+    const auto read = data_table::from_string(
+        "{ 0.5, \"two\", true, { x = 1 }, name = \"named\", false, -3 }");
+
+    REQUIRE(read.size() == 7);
+
+    REQUIRE(read.get_number(1) == 0.5);
+    REQUIRE(read.get_string(2) == "two");
+    REQUIRE(read.get_boolean(3) == true);
+    REQUIRE(read.get_data_table(4)->get_number("x") == 1.0);
+    REQUIRE(read.get_boolean(5) == false);
+    REQUIRE(read.get_number(6) == -3.0);
+    REQUIRE(read.get_string("name") == "named");
+
+    SECTION("a list of lists") {
+        const auto frames = data_table::from_string("{ { 0, 0 }, { 8, 8 }, }");
+
+        REQUIRE(frames.size() == 2);
+        REQUIRE(frames.get_data_table(2)->get_number(1) == 8.0);
+    }
+
+    SECTION("a listed value wins over the explicit key it lands on, written before it or after") {
+        REQUIRE(data_table::from_string("{ [1] = \"explicit\", \"listed\" }").get_string(1) == "listed");
+        REQUIRE(data_table::from_string("{ \"listed\", [1] = \"explicit\" }").get_string(1) == "listed");
+        REQUIRE(data_table::from_string("{ \"listed\", [2] = \"explicit\" }").get_string(2) == "explicit");
+    }
+
+    SECTION("and a list written back reads back the same") {
+        const auto again = data_table::from_string(read.to_string());
+
+        REQUIRE(again.size() == 7);
+        REQUIRE(again.get_number(6) == -3.0);
+    }
+
+    SECTION("a name with no value is still not a value") {
+        REQUIRE_THROWS(data_table::from_string("{ name }"));
+    }
+}
+
+TEST_CASE("a data file written by hand reads as lua would: comments, and a leading return", "[data_table][text]") {
+    const auto read = data_table::from_string(R"(
+        -- a character: what it is drawn with, and how it moves
+        return {
+            sheet = "villager", -- sheets/villager/
+            -- a comment between fields
+            speeds = { 1.8, -- walking
+                4.2 },
+            says = "hello -- not a comment, a string",
+        }
+        -- and after it
+    )");
+
+    REQUIRE(read.get_string("sheet") == "villager");
+    REQUIRE(read.get_data_table("speeds")->get_number(2) == 4.2);
+    REQUIRE(read.get_string("says") == "hello -- not a comment, a string");
+
+    SECTION("return is a word, not a prefix") {
+        REQUIRE_THROWS(data_table::from_string("returned { a = 1 }"));
+    }
+
+    SECTION("and nothing but data is read after it") {
+        REQUIRE_THROWS(data_table::from_string("return os.exit()"));
+        REQUIRE_THROWS(data_table::from_string("return { a = 1 } print(1)"));
     }
 }

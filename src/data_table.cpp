@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <iomanip>
 #include <cmath>
+#include <set>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -248,13 +249,31 @@ namespace jfc::lua {
 
                 if (peek() == '}') { ++m_At; return out; }
 
+                double position = 0;
+
+                std::set<double> listed;
+
                 for (;;)
                 {
-                    const auto field = read_key();
+                    if (is_listed_value()) {
+                        const key field(++position);
 
-                    expect('=');
+                        listed.insert(position);
 
-                    read_value_into(out, field);
+                        read_value_into(out, field);
+                    }
+                    else {
+                        const auto field = read_key();
+
+                        expect('=');
+
+                        if (field.is_number() && listed.count(std::get<double>(field.value()))) {
+                            data_table ignored;
+
+                            read_value_into(ignored, field);
+                        }
+                        else read_value_into(out, field);
+                    }
 
                     if (peek() == ',') {
                         ++m_At;
@@ -274,6 +293,9 @@ namespace jfc::lua {
 
             void expect_end() { if (peek() != '\0') fail("trailing characters"); }
 
+            void begin() { skip_return(); }
+
+
         private:
             [[noreturn]] void fail(const std::string &aWhy) const {
                 throw exception("could not parse a data_table at character "
@@ -281,10 +303,33 @@ namespace jfc::lua {
             }
 
             [[nodiscard]] char peek() {
-                while (m_At < m_Text.size() && std::isspace(static_cast<unsigned char>(m_Text[m_At])))
-                    ++m_At;
+                m_At = skipped(m_At);
 
                 return m_At < m_Text.size() ? m_Text[m_At] : '\0';
+            }
+
+            [[nodiscard]] std::size_t skipped(std::size_t aAt) const {
+                for (;;) {
+                    while (aAt < m_Text.size() && std::isspace(static_cast<unsigned char>(m_Text[aAt]))) ++aAt;
+
+                    if (m_Text.compare(aAt, 2, "--") != 0) return aAt;
+
+                    while (aAt < m_Text.size() && m_Text[aAt] != '\n') ++aAt;
+                }
+            }
+
+            void skip_return() {
+                const auto at = skipped(m_At);
+
+                if (m_Text.compare(at, 6, "return") != 0) return;
+
+                const auto after = at + 6;
+
+                if (after < m_Text.size()
+                    && (std::isalnum(static_cast<unsigned char>(m_Text[after])) || m_Text[after] == '_'))
+                    return;
+
+                m_At = after;
             }
 
             void expect(const char aCharacter) {
@@ -330,6 +375,24 @@ namespace jfc::lua {
                 expect('"');
 
                 return out;
+            }
+
+            [[nodiscard]] bool is_listed_value() {
+                const char next = peek();
+
+                if (next == '[') return false;
+
+                if (!(std::isalpha(static_cast<unsigned char>(next)) || next == '_')) return true;
+
+                auto at = m_At;
+
+                while (at < m_Text.size()
+                    && (std::isalnum(static_cast<unsigned char>(m_Text[at])) || m_Text[at] == '_'))
+                    ++at;
+
+                at = skipped(at);
+
+                return !(at < m_Text.size() && m_Text[at] == '=');
             }
 
             [[nodiscard]] key read_key() {
@@ -457,6 +520,8 @@ namespace jfc::lua {
 
     data_table data_table::from_string(const std::string &aText) {
         literal_reader reader(aText);
+
+        reader.begin();
 
         auto out = reader.read_table();
 

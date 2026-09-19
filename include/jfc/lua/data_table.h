@@ -58,7 +58,7 @@ namespace jfc::lua
         /// \brief the table as a lua table literal
         [[nodiscard]] std::string to_string() const;
 
-        /// \brief read back what to_string produced, **without running it as lua**
+        /// \brief read back what to_string produced **without running it as lua**
         ///
         /// \warning throws exception if it does not parse
         [[nodiscard]] static data_table from_string(const std::string &aText);
