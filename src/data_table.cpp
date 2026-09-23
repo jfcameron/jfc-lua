@@ -11,6 +11,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <iomanip>
+#include <locale>
 #include <cmath>
 #include <set>
 #include <sstream>
@@ -206,6 +207,29 @@ namespace jfc::lua {
             for (const auto *const reserved : RESERVED) if (aName == reserved) return false;
 
             return true;
+        }
+
+        void _write_number(std::ostream &aOut, const double aValue) {
+            for (int digits = 6; digits < 17; ++digits) {
+                std::ostringstream tried;
+
+                tried.imbue(std::locale::classic());
+
+                tried << std::setprecision(digits) << aValue;
+
+                if (std::strtod(tried.str().c_str(), nullptr) == aValue) {
+                    aOut << tried.str();
+
+                    return;
+                }
+            }
+
+            //! seventeen is enough for every double there is, so this is the end of it
+            const auto previous = aOut.precision(17);
+
+            aOut << aValue;
+
+            aOut.precision(previous);
         }
 
         void _write_quoted(std::ostream &aOut, const std::string &aText) {
@@ -468,7 +492,7 @@ namespace jfc::lua {
             std::visit([&stream](auto &&value) {
                 using value_type = std::decay_t<decltype(value)>;
 
-                if constexpr (std::is_same_v<value_type, double>) stream << value;
+                if constexpr (std::is_same_v<value_type, double>) _write_number(stream, value);
                 else if constexpr (std::is_same_v<value_type, bool>) stream << (value ? "true" : "false");
                 else if constexpr (std::is_same_v<value_type, std::string>) _write_quoted(stream, value);
                 else if constexpr (std::is_same_v<value_type, std::shared_ptr<data_table>>) {
@@ -483,7 +507,13 @@ namespace jfc::lua {
         const auto separate = [&stream, &remaining]() { if (--remaining) stream << ","; };
 
         for (const auto &field : fields) {
-            if (field.is_number()) stream << "[" << std::get<double>(field.value()) << "]=";
+            if (field.is_number()) {
+                stream << "[";
+
+                _write_number(stream, std::get<double>(field.value()));
+
+                stream << "]=";
+            }
             else if (field.is_boolean())
                 stream << "[" << (std::get<bool>(field.value()) ? "true" : "false") << "]=";
             else {

@@ -251,3 +251,46 @@ TEST_CASE("a table crosses back into lua intact", "[table]") {
         REQUIRE(t.describe("holder.placed.value") == "9");
     }
 }
+
+TEST_CASE("a number survives being written down and read back", "[table]") {
+    const double numbers[]{
+        4503599627370496.0,    
+        12345678.0,
+        0.123456789,
+        1.0 / 3.0,
+        -98765.4321,
+        1e-7,
+        1.5,                    
+        100.0,
+        0.0,
+    };
+
+    for (const double each : numbers) {
+        INFO(each);
+
+        jfc::lua::data_table source;
+
+        source.set("value", each);
+        source.set(each, std::string("keyed by it too"));
+
+        const auto read = jfc::lua::data_table::from_string(source.to_string());
+
+        REQUIRE(read.get_number("value") == each);
+        REQUIRE(read.get_string(each) == "keyed by it too");
+    }
+
+    SECTION("and a plain number is written plainly, for whoever opens the file") {
+        jfc::lua::data_table table;
+
+        table.set("size", 1.5);
+        table.set("full", 100.0);
+
+        const auto text = table.to_string();
+
+        REQUIRE(text.find("1.5") != std::string::npos);
+        REQUIRE(text.find("100") != std::string::npos);
+
+        REQUIRE(text.find("1.5000") == std::string::npos);
+        REQUIRE(text.find("100.000") == std::string::npos);
+    }
+}
