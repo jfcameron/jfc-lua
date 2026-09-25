@@ -293,4 +293,40 @@ TEST_CASE("a number survives being written down and read back", "[table]") {
         REQUIRE(text.find("1.5000") == std::string::npos);
         REQUIRE(text.find("100.000") == std::string::npos);
     }
+
+    SECTION("a whole number is never written in scientific notation") {
+        const double whole[]{
+            7250984733720.0,        
+            63150973064418.0,      
+            1e12, 1e13, 1e14, 1e15,
+            9007199254740992.0,   
+            -7250984733720.0,
+            120.0, 1000000.0, 0.0, -0.0,
+        };
+
+        for (const double each : whole) {
+            INFO(each);
+
+            jfc::lua::data_table table;
+
+            table.set("id", each);
+
+            const auto text = table.to_string();
+
+            INFO(text);
+
+            REQUIRE(text.find('e') == std::string::npos);
+            REQUIRE(text.find('.') == std::string::npos);
+
+            REQUIRE(jfc::lua::data_table::from_string(text).get_number("id") == each);
+        }
+    }
+
+    SECTION("negative zero is written as zero") {
+        jfc::lua::data_table table;
+
+        table.set("none", -0.0);
+
+        REQUIRE(table.to_string().find("-0") == std::string::npos);
+    }
 }

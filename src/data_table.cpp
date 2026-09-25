@@ -210,6 +210,19 @@ namespace jfc::lua {
         }
 
         void _write_number(std::ostream &aOut, const double aValue) {
+            if (double whole = 0; std::modf(aValue, &whole) == 0.0
+                && std::fabs(whole) <= 9007199254740992.0) {
+                std::ostringstream tried;
+
+                tried.imbue(std::locale::classic());
+
+                tried << std::fixed << std::setprecision(0) << (whole == 0 ? 0.0 : whole);
+
+                aOut << tried.str();
+
+                return;
+            }
+
             for (int digits = 6; digits < 17; ++digits) {
                 std::ostringstream tried;
 
