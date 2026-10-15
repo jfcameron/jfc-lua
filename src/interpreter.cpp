@@ -396,6 +396,9 @@ namespace jfc::lua {
     void interpreter::register_function(const path &aName, closure_type aClosure)
         { m_pGlobals->register_function(aName, std::move(aClosure)); }
 
+    void interpreter::set_call_timer(call_timer_type aTimer)
+        { m_pLimits->callTimer = std::move(aTimer); }
+
     interpreter::error_type interpreter::run(const std::string &aLuaScript)
         { return m_pGlobals->run(aLuaScript); }
 

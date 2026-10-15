@@ -10,12 +10,14 @@
 #include <jfc/lua/userdata.h>
 #include <jfc/lua/data_table.h>
 
+#include <chrono>
 #include <cstdio>
 #include <functional>
 #include <new>
 #include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -462,6 +464,11 @@ namespace jfc::lua {
         { return _read_userdata(aPath); }
 
     namespace {
+        struct registered_closure final {
+            environment::closure_type closure;
+            std::string name;
+        };
+
         template <bool yields>
         int _closure_trampoline(lua_State *p) {
             if constexpr (yields) {
@@ -480,8 +487,15 @@ namespace jfc::lua {
             int results = 0;
 
             try {
-                auto *pImpl = static_cast<environment::closure_type *>(
-                    lua_touserdata(p, lua_upvalueindex(1)));
+                auto *pImpl = static_cast<registered_closure *>(lua_touserdata(p, lua_upvalueindex(1)));
+
+                void *ud = nullptr;
+
+                lua_getallocf(p, &ud);
+
+                const auto *const pLimits = static_cast<const interpreter_limits *>(ud);
+                const bool timed = pLimits && pLimits->callTimer;
+                const auto began = timed ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
 
                 value_list_type args;
 
@@ -492,7 +506,7 @@ namespace jfc::lua {
                         + lua_typename(p, lua_type(p, i)) + ", which cannot cross into c++");
                 }
 
-                auto return_values = (*pImpl)(std::move(args));
+                auto return_values = pImpl->closure(std::move(args));
 
                 lua_settop(p, 0);
 
@@ -502,6 +516,8 @@ namespace jfc::lua {
                 for (const auto &val : return_values) jfc::lua::detail::push_param(p, val);
 
                 results = static_cast<int>(return_values.size());
+
+                if (timed) pLimits->callTimer(pImpl->name, std::chrono::steady_clock::now() - began);
             }
             catch (const std::exception &e) {
                 std::snprintf(failure, sizeof failure, "%s", e.what());
@@ -537,15 +553,19 @@ namespace jfc::lua {
 
         const auto trampoline = aYields ? _closure_trampoline<true> : _closure_trampoline<false>;
 
-        _write_value(L, registry_reference(), aName, [L, &aClosure, trampoline]() {
-            auto *const pStorage = static_cast<closure_type *>(
-                lua_newuserdata(L, sizeof(closure_type)));
+        std::ostringstream name;
 
-            new (pStorage) closure_type(aClosure);
+        name << aName;
+
+        _write_value(L, registry_reference(), aName, [L, &aClosure, trampoline, &name]() {
+            auto *const pStorage = static_cast<registered_closure *>(
+                lua_newuserdata(L, sizeof(registered_closure)));
+
+            new (pStorage) registered_closure{aClosure, name.str()};
 
             if (luaL_newmetatable(L, "jfc.lua.closure")) {
                 lua_pushcfunction(L, [](lua_State *p) {
-                    static_cast<closure_type *>(lua_touserdata(p, 1))->~closure_type();
+                    static_cast<registered_closure *>(lua_touserdata(p, 1))->~registered_closure();
                     return 0;
                 });
 

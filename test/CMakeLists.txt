@@ -6,6 +6,7 @@ jfc_add_tests(
     TEST_SOURCE_FILES
         "${CMAKE_CURRENT_LIST_DIR}/array_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/call_test.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/call_timer_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/coroutine_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/closure_boundary_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/data_table_access_test.cpp"

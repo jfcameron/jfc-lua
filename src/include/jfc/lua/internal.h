@@ -13,9 +13,12 @@
     #define LUA_OK 0
 #endif
 
+#include <chrono>
 #include <cstddef>
 #include <functional>
 #include <optional>
+#include <string>
+#include <string_view>
 
 namespace jfc::lua {
     /// \brief what the allocator and the instruction hook share
@@ -52,6 +55,9 @@ namespace jfc::lua {
 
         //! what to do when the budget is reached; empty means stop
         std::function<bool(const std::size_t)> onExhausted;
+
+        //! told of every call a script makes into a registered function
+        std::function<void(std::string_view, std::chrono::nanoseconds)> callTimer;
     };
 }
 

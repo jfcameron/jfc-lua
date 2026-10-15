@@ -6,9 +6,11 @@
 #include <jfc/lua/interpreter.h>
 #include <jfc/lua/userdata.h>
 
+#include <chrono>
 #include <cstdio>
 #include <new>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -157,6 +159,14 @@ namespace {
             auto *pMethod = static_cast<jfc::lua::interpreter::untyped_method_type *>(
                 lua_touserdata(p, lua_upvalueindex(1)));
 
+            void *ud = nullptr;
+
+            lua_getallocf(p, &ud);
+
+            const auto *const pLimits = static_cast<const jfc::lua::interpreter_limits *>(ud);
+            const bool timed = pLimits && pLimits->callTimer;
+            const auto began = timed ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+
             const jfc::lua::userdata object = *self;
 
             jfc::lua::value_list_type args;
@@ -179,6 +189,14 @@ namespace {
             for (const auto &value : returned) jfc::lua::detail::push_param(p, value);
 
             results = static_cast<int>(returned.size());
+
+            if (timed) {
+                std::size_t length = 0;
+
+                const char *const name = lua_tolstring(p, lua_upvalueindex(5), &length);
+
+                pLimits->callTimer(std::string_view(name, length), std::chrono::steady_clock::now() - began);
+            }
         }
         catch (const std::exception &e) {
             std::snprintf(failure, sizeof failure, "%s", e.what());
@@ -349,8 +367,9 @@ namespace jfc::lua {
             _push_key(L, aTypeKey);
             lua_pushstring(L, aName.c_str());
             lua_pushstring(L, name.c_str());
+            lua_pushstring(L, (aName + ":" + name).c_str());
 
-            lua_pushcclosure(L, _method_trampoline, 4);
+            lua_pushcclosure(L, _method_trampoline, 5);
 
             lua_setfield(L, name == CALL ? metatable : methods, name.c_str());
         }

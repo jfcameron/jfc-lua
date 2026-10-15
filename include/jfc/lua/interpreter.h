@@ -10,12 +10,14 @@
 #include <jfc/lua/types.h>
 #include <jfc/lua/userdata.h>
 
+#include <chrono>
 #include <cstddef>
 #include <functional>
 #include <memory>
 #include <utility>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace jfc::lua {
@@ -131,6 +133,11 @@ namespace jfc::lua {
 
         /// \brief registers a closure (c++ lambda with captured data)
         void register_function(const path &aName, closure_type a);
+
+        using call_timer_type = std::function<void(std::string_view aName, std::chrono::nanoseconds aTook)>;
+
+        /// \brief every call a script makes into a registered function, timed
+        void set_call_timer(call_timer_type aTimer);
 
         /// \brief a method a script calls on an object_type: `object:name(arguments)`
         template <typename object_type>
