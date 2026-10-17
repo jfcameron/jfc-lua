@@ -59,6 +59,35 @@ jobs:
         if: matrix.tests
         run: ctest --preset ${{ matrix.preset }}
 
+  emscripten:
+    name: emscripten (wasm)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: report the toolchain
+        run: emcc --version
+
+      - name: configure
+        run: emcmake cmake --preset emscripten
+
+      - name: build
+        run: cmake --build --preset emscripten
+
+      - name: test under node
+        run: ctest --preset emscripten
+
   docs:
     name: docs (doxygen)
     runs-on: ubuntu-latest

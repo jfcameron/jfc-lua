@@ -12,12 +12,27 @@ option(JFC_BUILD_DEMO "Build the demo" ON)
 option(JFC_BUILD_DOCS "Build documentation" OFF)
 option(JFC_BUILD_TESTS "Build unit tests" ON)
 
-set(JFC_LUA_BACKEND "luajit" CACHE STRING "lua implementation to build against: luajit or lua51")
+# LuaJIT's interpreter is machine code DynASM assembles for x86, ARM, PPC and MIPS; there is no
+# WebAssembly target, nor can there be, since a page cannot write code to run. So a browser build
+# is lua51, plain C, which builds with emcc as it is
+if (EMSCRIPTEN)
+    set(_jfc_lua_default_backend "lua51")
+else()
+    set(_jfc_lua_default_backend "luajit")
+endif()
+
+set(JFC_LUA_BACKEND "${_jfc_lua_default_backend}" CACHE STRING "lua implementation to build against: luajit or lua51")
 set_property(CACHE JFC_LUA_BACKEND PROPERTY STRINGS "luajit" "lua51")
 
 if (NOT JFC_LUA_BACKEND MATCHES "^(luajit|lua51)$")
     message(FATAL_ERROR
         "JFC_LUA_BACKEND is \"${JFC_LUA_BACKEND}\" but must be one of: luajit, lua51")
+endif()
+
+if (EMSCRIPTEN AND JFC_LUA_BACKEND STREQUAL "luajit")
+    message(FATAL_ERROR
+        "JFC_LUA_BACKEND is \"luajit\", which has no WebAssembly target: LuaJIT's interpreter is "
+        "machine code, and a page cannot write any to run. Under emscripten the backend is lua51.")
 endif()
 
 if (JFC_LUA_BACKEND STREQUAL "luajit")
