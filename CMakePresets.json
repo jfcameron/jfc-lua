@@ -111,12 +111,13 @@
     {
       "name": "emscripten",
       "displayName": "Emscripten / wasm",
-      "description": "Configure with `emcmake cmake --preset emscripten`, which supplies the toolchain file. The backend is lua51, LuaJIT having no WebAssembly target; ctest runs the tests under node. The heap may grow: the memory budget tests fill more than a page starts with.",
+      "description": "Configure with `emcmake cmake --preset emscripten`, which supplies the toolchain file. The backend is lua51, LuaJIT having no WebAssembly target; ctest runs the tests under node. The heap may grow: the memory budget tests fill more than a page starts with. Exceptions are WebAssembly's own, which lua's errors are, PUC Lua being built as c++: they cost nothing until thrown, where -fexceptions slows every call that might throw.",
       "inherits": "base",
       "cacheVariables": {
         "JFC_LUA_BACKEND": "lua51",
-        "CMAKE_CXX_FLAGS": "-fexceptions -Wall -Wextra",
-        "CMAKE_EXE_LINKER_FLAGS": "-fexceptions -sALLOW_MEMORY_GROWTH",
+        "CMAKE_C_FLAGS": "-fwasm-exceptions",
+        "CMAKE_CXX_FLAGS": "-fwasm-exceptions -Wall -Wextra",
+        "CMAKE_EXE_LINKER_FLAGS": "-fwasm-exceptions -sALLOW_MEMORY_GROWTH",
         "CMAKE_CROSSCOMPILING_EMULATOR": "node"
       }
     }

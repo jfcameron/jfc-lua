@@ -4,6 +4,14 @@
 
 #include <jfc/lua.h>
 
+#include <cctype>
+#include <clocale>
+#include <cmath>
+#include <initializer_list>
+#include <limits>
+#include <locale>
+#include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -451,4 +459,211 @@ TEST_CASE("a data file written by hand reads as lua would: comments, and a leadi
         REQUIRE_THROWS(data_table::from_string("return os.exit()"));
         REQUIRE_THROWS(data_table::from_string("return { a = 1 } print(1)"));
     }
+}
+
+TEST_CASE("NaN and the infinities are written as lua writes them, and read back", "[text]") {
+    const auto inf = std::numeric_limits<double>::infinity();
+
+    data_table t;
+
+    t.set("none", std::numeric_limits<double>::quiet_NaN());
+    t.set("up", inf);
+    t.set("down", -inf);
+    t.set(inf, std::string("far"));
+
+    const auto text = t.to_string();
+
+    INFO(text);
+
+    REQUIRE(text.find("0/0") != std::string::npos);
+    REQUIRE(text.find("inf") == std::string::npos);
+
+    const auto back = data_table::from_string(text);
+
+    REQUIRE(std::isnan(*back.get_number("none")));
+    REQUIRE(back.get_number("up") == inf);
+    REQUIRE(back.get_number("down") == -inf);
+    REQUIRE(back.get_string(inf) == "far");
+
+    SECTION("and run as lua") {
+        interpreter interp;
+
+        auto env = interp.make_environment();
+
+        REQUIRE_FALSE(env->run("t = " + text).has_value());
+
+        REQUIRE(std::isnan(*env->read_number("t.none")));
+        REQUIRE(env->read_number("t.down") == -inf);
+        REQUIRE(env->read_string(path{"t", inf}) == "far");
+    }
+}
+
+TEST_CASE("nan and inf, as older versions wrote them, still read", "[text]") {
+    const auto back = data_table::from_string("{a=nan,b=inf,c=-inf}");
+
+    REQUIRE(std::isnan(*back.get_number("a")));
+    REQUIRE(back.get_number("b") == std::numeric_limits<double>::infinity());
+    REQUIRE(back.get_number("c") == -std::numeric_limits<double>::infinity());
+}
+
+TEST_CASE("only the divisions to_string writes are read", "[text]") {
+    REQUIRE_THROWS_AS(data_table::from_string("{a=2/0}"), exception);
+    REQUIRE_THROWS_AS(data_table::from_string("{a=1/2}"), exception);
+}
+
+TEST_CASE("a NaN key in text is refused", "[text]") {
+    REQUIRE_THROWS_AS(data_table::from_string("{[0/0]=1}"), exception);
+    REQUIRE_THROWS_AS(data_table::from_string("{[nan]=1}"), exception);
+}
+
+TEST_CASE("text nested deeper than a table may be is refused, not followed off the stack", "[text]") {
+    const auto nested = [](const std::size_t aDepth) {
+        return std::string(aDepth, '{') + std::string(aDepth, '}');
+    };
+
+    REQUIRE_NOTHROW(data_table::from_string(nested(data_table::MAXIMUM_DEPTH)));
+    REQUIRE_THROWS_WITH(data_table::from_string(nested(data_table::MAXIMUM_DEPTH + 1)), Catch::Matchers::Contains("nesting"));
+    REQUIRE_THROWS_AS(data_table::from_string(nested(1000000)), exception);
+}
+
+namespace {
+    class scoped_locale final {
+        std::locale m_Previous;
+        bool m_Found = false;
+
+    public:
+        scoped_locale(const scoped_locale &) = delete;
+        scoped_locale &operator=(const scoped_locale &) = delete;
+
+        scoped_locale(const std::initializer_list<const char *> aNames) {
+            for (const auto *const name : aNames) {
+                try { m_Previous = std::locale::global(std::locale(name)); }
+                catch (const std::runtime_error &) { continue; }
+
+                m_Found = true;
+
+                return;
+            }
+        }
+
+        ~scoped_locale() { if (m_Found) std::locale::global(m_Previous); }
+
+        [[nodiscard]] bool found() const { return m_Found; }
+    };
+}
+
+TEST_CASE("numbers read and write the same whatever the locale", "[text][locale]") {
+    const scoped_locale comma({"de_DE.UTF-8", "de_DE.utf8", "fr_FR.UTF-8", "fr_FR.utf8"});
+
+    if (!comma.found() || std::string(std::localeconv()->decimal_point) != ",") {
+        WARN("no locale with a comma for its decimal point is installed: nothing to check");
+
+        return;
+    }
+
+    SECTION("written with points") {
+        data_table t;
+
+        t.set("half", 0.5);
+        t.set("tenth", 0.1);
+        t.set("big", 1234567.0);
+
+        REQUIRE(t.to_string() == "{big=1234567,half=0.5,tenth=0.1}");
+    }
+
+    SECTION("read with points") {
+        const auto t = data_table::from_string("{half=0.5,[0.25]=\"quarter\"}");
+
+        REQUIRE(t.get_number("half") == 0.5);
+        REQUIRE(t.get_string(0.25) == "quarter");
+    }
+
+    SECTION("a comma between numbers is not taken for a decimal point") {
+        const auto t = data_table::from_string("{1,2}");
+
+        REQUIRE(t.size() == 2);
+        REQUIRE(t.get_number(1) == 1.0);
+        REQUIRE(t.get_number(2) == 2.0);
+    }
+
+    SECTION("paths too") {
+        REQUIRE(path("t[0.5]") == path{"t", 0.5});
+
+        std::ostringstream written;
+
+        written << path{"t", 0.5};
+
+        REQUIRE(written.str() == "t[0.5]");
+    }
+}
+
+TEST_CASE("what is a name or a space does not follow the locale", "[text][locale]") {
+    const scoped_locale latin({"de_DE", "de_DE.ISO-8859-1", "de_DE.iso88591", "fr_FR", "fr_FR.ISO-8859-1"});
+
+    const std::string e = "\xC3\xAA";
+
+    if (!latin.found() || !std::isalpha(static_cast<unsigned char>(e[0])) || !std::isalpha(static_cast<unsigned char>(e[1]))) {
+        WARN("no latin-1 locale is installed: nothing to check");
+
+        return;
+    }
+
+    SECTION("a key of utf-8 is quoted, as lua wants it") {
+        data_table t;
+
+        t.set(e, 1.0);
+
+        REQUIRE(t.to_string() == "{[\"" + e + "\"]=1}");
+    }
+
+    SECTION("and read only quoted") {
+        REQUIRE_THROWS_AS(data_table::from_string("{" + e + "=1}"), exception);
+    }
+}
+
+TEST_CASE("numbers read in every spelling lua and older versions wrote", "[text]") {
+    const auto t = data_table::from_string("{0x10,-0Xff,.5,5.,1e3,1E-3,-0,-nan(ind),infinity,+2}");
+
+    REQUIRE(t.get_number(1) == 16.0);
+    REQUIRE(t.get_number(2) == -255.0);
+    REQUIRE(t.get_number(3) == 0.5);
+    REQUIRE(t.get_number(4) == 5.0);
+    REQUIRE(t.get_number(5) == 1000.0);
+    REQUIRE(t.get_number(6) == 0.001);
+    REQUIRE(std::signbit(*t.get_number(7)));
+    REQUIRE(std::isnan(*t.get_number(8)));
+    REQUIRE(t.get_number(9) == std::numeric_limits<double>::infinity());
+    REQUIRE(t.get_number(10) == 2.0);
+
+    REQUIRE_THROWS_AS(data_table::from_string("{1e}"), exception);
+    REQUIRE_THROWS_AS(data_table::from_string("{.}"), exception);
+    REQUIRE_THROWS_AS(data_table::from_string("{0x}"), exception);
+}
+
+TEST_CASE("lua's own numbers are spelt with a point whatever the locale", "[locale]") {
+    const scoped_locale comma({"de_DE.UTF-8", "de_DE.utf8", "fr_FR.UTF-8", "fr_FR.utf8"});
+
+    if (!comma.found() || std::string(std::localeconv()->decimal_point) != ",") {
+        WARN("no locale with a comma for its decimal point is installed: nothing to check");
+
+        return;
+    }
+
+    interpreter lua;
+
+    auto env = lua.make_environment();
+
+    REQUIRE_FALSE(env->run(R"(
+        written = tostring(0.5)
+        joined = "x" .. 1.5
+        read = tonumber("0.25")
+        read_with_comma = tonumber("0,25")
+        number = 0.75
+    )").has_value());
+
+    REQUIRE(env->read_string("written") == "0.5");
+    REQUIRE(env->read_string("joined") == "x1.5");
+    REQUIRE(env->read_number("read") == 0.25);
+    REQUIRE_FALSE(env->read_number("read_with_comma").has_value());
+    REQUIRE(env->read_number("number") == 0.75);
 }

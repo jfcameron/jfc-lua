@@ -23,11 +23,11 @@ namespace {
 }
 
 TEST_CASE("a c++ object can be handed to a script and read back", "[userdata][crossing]") {
+    int destroyed = 0;
+
     interpreter interp;
 
     auto env = interp.make_environment();
-
-    int destroyed = 0;
 
     const auto original = std::make_shared<body>(100, &destroyed);
 
@@ -89,11 +89,11 @@ TEST_CASE("a c++ object can be handed to a script and read back", "[userdata][cr
 }
 
 TEST_CASE("a script may pass a handle about without being able to open it", "[userdata][crossing]") {
+    int destroyed = 0;
+
     interpreter interp;
 
     auto env = interp.make_environment();
-
-    int destroyed = 0;
 
     env->write("a", std::make_shared<body>(1, &destroyed));
 
@@ -124,12 +124,12 @@ TEST_CASE("a script may pass a handle about without being able to open it", "[us
 }
 
 TEST_CASE("a bound object is interpreter-scoped, not environment-scoped", "[userdata][crossing]") {
+    int destroyed = 0;
+
     interpreter interp;
 
     auto one = interp.make_environment();
     auto two = interp.make_environment();
-
-    int destroyed = 0;
 
     const auto original = std::make_shared<body>(5, &destroyed);
 
@@ -223,11 +223,11 @@ TEST_CASE("ownership is shared across the barrier", "[userdata][crossing]") {
 }
 
 TEST_CASE("a bound object crosses in a call, in both directions", "[userdata][crossing][params]") {
+    int destroyed = 0;
+
     interpreter interp;
 
     auto env = interp.make_environment();
-
-    int destroyed = 0;
 
     const auto original = std::make_shared<body>(100, &destroyed);
 

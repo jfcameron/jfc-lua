@@ -29,7 +29,7 @@ An environment is an independent set of global variables, made by an interpreter
 
 By default an environment can only reach the parts of the standard library that compute: string, table, math, coroutine, the clock parts of os, and the base functions that cannot reach outside the VM. It can be given the unrestricted standard library instead, but that includes `debug`, which can reach every other environment in the same interpreter and run commands on the system.
 
-Functions registered with an environment are C++ lambdas, and are visible to that environment alone. A C++ exception thrown inside one becomes a Lua error in the script that called it, since a C++ exception cannot unwind through Lua.
+Functions registered with an environment are C++ lambdas, and are visible to that environment alone. A C++ exception thrown inside one becomes a Lua error in the script that called it, since a C++ exception cannot unwind through Lua. A registered function lives in the Lua state, so one that holds an environment or reference by `std::shared_ptr` keeps the whole interpreter alive: hold a `std::weak_ptr` instead.
 
 ### Paths
 Values are read and written by path, in the same form Lua uses: `"player.hitbox.bounds.x"`, `"names[1]"`. A path can also be written out as its keys, `{"names", 1}`, for one assembled at runtime.

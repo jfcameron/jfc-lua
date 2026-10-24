@@ -234,3 +234,17 @@ TEST_CASE("the message names the path and the reason", "[path]") {
         REQUIRE(what.find("oops") != std::string::npos);
     }
 }
+
+TEST_CASE("a number in a path prints so it parses back to the same key", "[path]") {
+    for (const double number : {123456789.0, 0.1, -2.5e-300, 1e21, 9007199254740993.0}) {
+        const path p{"t", number};
+
+        std::ostringstream printed;
+
+        printed << p;
+
+        INFO(printed.str());
+
+        REQUIRE(path(printed.str()) == p);
+    }
+}

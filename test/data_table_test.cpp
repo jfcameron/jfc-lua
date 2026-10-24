@@ -4,6 +4,7 @@
 
 #include <jfc/lua.h>
 
+#include <limits>
 #include <sstream>
 #include <string>
 
@@ -329,4 +330,65 @@ TEST_CASE("a number survives being written down and read back", "[table]") {
 
         REQUIRE(table.to_string().find("-0") == std::string::npos);
     }
+}
+
+TEST_CASE("a NaN key is refused, and asked for, is nothing", "[data_table]") {
+    const auto nan = std::numeric_limits<double>::quiet_NaN();
+
+    data_table t;
+
+    t.set(5, 1.0);
+    t.set("x", 2.0);
+
+    REQUIRE_THROWS_AS(t.set(nan, 1.0), exception);
+    REQUIRE_FALSE(t.get_number(nan).has_value());
+    REQUIRE_FALSE(t.contains(nan));
+
+    t.erase(nan);
+
+    REQUIRE(t.size() == 2);
+    REQUIRE(t.get_number(5) == 1);
+}
+
+TEST_CASE("a string keeps its NULs as a key and as a value, into lua and out", "[data_table]") {
+    const std::string withNul("a\0b", 3);
+
+    interpreter interp;
+
+    auto env = interp.make_environment();
+
+    data_table t;
+
+    t.set(withNul, withNul);
+
+    env->write("t", t);
+
+    REQUIRE_FALSE(env->run("for k, v in pairs(t) do keyLength, valueLength = #k, #v end").has_value());
+    REQUIRE(env->read_number("keyLength") == 3);
+    REQUIRE(env->read_number("valueLength") == 3);
+
+    REQUIRE_FALSE(env->run("back = { ['x\\0y'] = 'p\\0q' }").has_value());
+
+    const auto back = env->read_data_table("back");
+
+    REQUIRE(back);
+    REQUIRE(back->get_string(std::string("x\0y", 3)) == std::string("p\0q", 3));
+}
+
+TEST_CASE("a table as deep as reading allows writes back", "[data_table]") {
+    interpreter interp;
+
+    auto env = interp.make_environment();
+
+    REQUIRE_FALSE(env->run(
+        "deep = {} local at = deep\n"
+        "for i = 1, 127 do at.inner = { n = i } at = at.inner end").has_value());
+
+    const auto deep = env->read_data_table("deep");
+
+    REQUIRE(deep);
+
+    env->write("copy", *deep);
+
+    REQUIRE(env->read_data_table("copy")->to_string() == deep->to_string());
 }

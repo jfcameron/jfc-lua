@@ -6,6 +6,7 @@
 
 #include <lua.hpp>
 
+#include <optional>
 #include <string>
 #include <variant>
 
@@ -416,4 +417,25 @@ TEST_CASE("**a coroutine resumed for as long as a game runs does not grow**", "[
     }
 
     REQUIRE(std::get<double>(out.at(0)) == 10000);
+}
+
+TEST_CASE("a coroutine yielding a table holding what cannot cross fails with an error, not an exception", "[coroutine]") {
+    interpreter interp;
+
+    auto env = interp.make_environment();
+
+    REQUIRE_FALSE(env->run("function c() coroutine.yield({ f = print }) end").has_value());
+
+    auto co = env->make_coroutine("c");
+
+    REQUIRE(co);
+
+    value_list_type results;
+
+    std::optional<std::string> error;
+
+    REQUIRE_NOTHROW(error = co->resume({}, results));
+    REQUIRE(error.has_value());
+    REQUIRE(error->find("f holds a function") != std::string::npos);
+    REQUIRE(co->state() == coroutine::status::failed);
 }

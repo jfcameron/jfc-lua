@@ -1,20 +1,17 @@
 # © Joseph Cameron - All Rights Reserved
 
-cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 project(jfclua
     VERSION 0.0
-    DESCRIPTION "c++ lua wrapper")
+    DESCRIPTION "jfc lua: Lua 5.1 embedded in c++, on LuaJIT or the reference implementation, with sandboxed environments, memory and instruction budgets, and values, functions and objects crossing both ways")
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/jfc-cmake/jfclib.cmake")
 
-option(JFC_BUILD_DEMO "Build the demo" ON)
+option(JFC_BUILD_DEMO "Build the demo" OFF)
 option(JFC_BUILD_DOCS "Build documentation" OFF)
-option(JFC_BUILD_TESTS "Build unit tests" ON)
+option(JFC_BUILD_TESTS "Build unit tests" ${PROJECT_IS_TOP_LEVEL})
 
-# LuaJIT's interpreter is machine code DynASM assembles for x86, ARM, PPC and MIPS; there is no
-# WebAssembly target, nor can there be, since a page cannot write code to run. So a browser build
-# is lua51, plain C, which builds with emcc as it is
 if (EMSCRIPTEN)
     set(_jfc_lua_default_backend "lua51")
 else()

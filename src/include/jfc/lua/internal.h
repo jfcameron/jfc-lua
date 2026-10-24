@@ -15,10 +15,14 @@
 
 #include <chrono>
 #include <cstddef>
+#include <exception>
 #include <functional>
+#include <iosfwd>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
+#include <utility>
 
 namespace jfc::lua {
     /// \brief what the allocator and the instruction hook share
@@ -50,6 +54,9 @@ namespace jfc::lua {
         //! whether the instruction hook has been installed yet
         bool hookInstalled{false};
 
+        //! whether allocations ignore the caps, for those nothing could catch a refusal of
+        bool unbudgeted{false};
+
         //! whether this run has already been told to stop
         bool aborted{false};
 
@@ -80,6 +87,49 @@ namespace jfc::lua::detail {
 
     /// \brief push the table a box's own fields are kept in, to write the key at aKey into
     [[nodiscard]] bool push_field_table(lua_State *L, int aBox, int aKey);
+
+    //! aValue as text lua reads back as the same double: the shortest that does, 0/0 and 1/0 for NaN and infinity
+    void write_number(std::ostream &aOut, double aValue);
+
+    /// \brief the number aText begins with, spelt as lua spells one, and how many characters it took; the c locale's
+    /// decimal point plays no part
+    [[nodiscard]] std::optional<std::pair<double, std::size_t>> read_number(std::string_view aText);
+
+    /// \brief runs aWork so that a lua error raised in it -- a metamethod's, running out of memory -- comes back as its
+    /// message instead of ending the program. A std::exception aWork throws is thrown again once the call is over.
+    ///
+    /// PUC Lua raises with longjmp, so aWork holds nothing with a destructor across a lua call that can raise.
+    template <typename work_type>
+    [[nodiscard]] std::optional<std::string> protect(lua_State *const L, work_type &&aWork) {
+        struct context final {
+            std::remove_reference_t<work_type> *pWork;
+            std::exception_ptr thrown;
+        } held{&aWork, {}};
+
+        const int status = lua_cpcall(L, [](lua_State *const p) -> int {
+            auto *const pHeld = static_cast<context *>(lua_touserdata(p, 1));
+
+            lua_pop(p, 1);
+
+            // a c++ exception unwinding through PUC Lua's C frames would leave the state in pieces
+            try { (*pHeld->pWork)(p); }
+            catch (const std::exception &) { pHeld->thrown = std::current_exception(); }
+
+            return 0;
+        }, &held);
+
+        std::optional<std::string> error;
+
+        if (status != LUA_OK) {
+            error = lua_type(L, -1) == LUA_TSTRING ? lua_tostring(L, -1) : "lua reported an error it could not describe";
+
+            lua_pop(L, 1);
+        }
+
+        if (held.thrown) std::rethrow_exception(held.thrown);
+
+        return error;
+    }
 }
 
 namespace {

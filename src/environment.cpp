@@ -65,7 +65,7 @@ void jfc::lua::detail::push_param(lua_State *const L,
 
         if constexpr (std::is_same_v<value_type, double>) lua_pushnumber(L, value);
         else if constexpr (std::is_same_v<value_type, bool>) lua_pushboolean(L, value);
-        else if constexpr (std::is_same_v<value_type, std::string>) lua_pushstring(L, value.c_str());
+        else if constexpr (std::is_same_v<value_type, std::string>) lua_pushlstring(L, value.data(), value.size());
         else if constexpr (std::is_same_v<value_type, jfc::lua::data_table>) value.push_to_lua_state(L);
         else if constexpr (std::is_same_v<value_type, jfc::lua::userdata>)
             jfc::lua::detail::push_userdata(L, value);
@@ -79,7 +79,7 @@ static void _push_key(lua_State *const L, const jfc::lua::key &aKey) {
 
         if constexpr (std::is_same_v<value_type, double>) lua_pushnumber(L, value);
         else if constexpr (std::is_same_v<value_type, bool>) lua_pushboolean(L, value);
-        else lua_pushstring(L, value.c_str());
+        else lua_pushlstring(L, value.data(), value.size());
     }, aKey.value());
 }
 
@@ -105,6 +105,8 @@ static bool _read_value(lua_State *L, const int aRoot, const jfc::lua::path &aPa
 
 static void _write_value(lua_State *L, const int aRoot, const jfc::lua::path &aPath,
     std::function<void()> &&aPushValueFunctor) {
+    if (aPath.empty()) throw jfc::lua::exception("an empty path names nothing to write to");
+
     lua_rawgeti(L, LUA_REGISTRYINDEX, aRoot);
 
     const int container = lua_gettop(L);
@@ -188,6 +190,23 @@ namespace jfc::lua {
     , m_InstructionBudget(aInstructionBudget)
     {}
 
+    namespace {
+        template <typename read_type>
+        [[nodiscard]] bool _protected_read(lua_State *const L, const int aRoot, const path &aPath, read_type &&aRead) {
+            return !detail::protect(L, [&](lua_State *) { if (_read_value(L, aRoot, aPath)) aRead(); });
+        }
+
+        void _protected_write(lua_State *const L, const int aRoot, const path &aPath, std::function<void()> &&aPush) {
+            if (const auto error = detail::protect(L, [&](lua_State *) { _write_value(L, aRoot, aPath, std::move(aPush)); })) {
+                std::ostringstream where;
+
+                where << aPath;
+
+                throw exception("could not write " + where.str() + ": " + *error);
+            }
+        }
+    }
+
     std::optional<double> reference::read_number(const path &aPath) const {
         auto *L = state();
 
@@ -195,7 +214,9 @@ namespace jfc::lua {
 
         std::optional<double> val;
 
-        if (_read_value(L, registry_reference(), aPath) && lua_type(L, -1) == LUA_TNUMBER) val = lua_tonumber(L, -1);
+        if (!_protected_read(L, registry_reference(), aPath, [&] {
+            if (lua_type(L, -1) == LUA_TNUMBER) val = lua_tonumber(L, -1);
+        })) return {};
 
         return val;
     }
@@ -207,7 +228,9 @@ namespace jfc::lua {
 
         std::optional<bool> val;
 
-        if (_read_value(L, registry_reference(), aPath) && lua_isboolean(L, -1)) val = lua_toboolean(L, -1);
+        if (!_protected_read(L, registry_reference(), aPath, [&] {
+            if (lua_isboolean(L, -1)) val = lua_toboolean(L, -1);
+        })) return {};
 
         return val;
     }
@@ -219,12 +242,14 @@ namespace jfc::lua {
 
         std::optional<std::string> val;
 
-        if (_read_value(L, registry_reference(), aPath) && lua_type(L, -1) == LUA_TSTRING) {
+        if (!_protected_read(L, registry_reference(), aPath, [&] {
+            if (lua_type(L, -1) != LUA_TSTRING) return;
+
             size_t len;
             const char *str = lua_tolstring(L, -1, &len);
 
             val = std::string(str, len);
-        }
+        })) return {};
 
         return val;
     }
@@ -235,9 +260,13 @@ namespace jfc::lua {
 
         const stack_guard guard(L);
 
-        if (_read_value(L, registry_reference(), aPath) && lua_istable(L, -1)) return data_table(L, -1, aPolicy);
+        std::optional<data_table> val;
 
-        return {};
+        if (!_protected_read(L, registry_reference(), aPath, [&] {
+            if (lua_istable(L, -1)) val = data_table(L, -1, aPolicy);
+        })) return {};
+
+        return val;
     }
 
     void reference::write(const path &aPath, const bool aValue) {
@@ -245,7 +274,7 @@ namespace jfc::lua {
 
         const stack_guard guard(L);
 
-        _write_value(L, registry_reference(), aPath, [L, aValue]() { lua_pushboolean(L, aValue); });
+        _protected_write(L, registry_reference(), aPath, [L, aValue]() { lua_pushboolean(L, aValue); });
     }
 
     void reference::write(const path &aPath, const double aValue) {
@@ -253,7 +282,7 @@ namespace jfc::lua {
 
         const stack_guard guard(L);
 
-        _write_value(L, registry_reference(), aPath, [L, aValue]() { lua_pushnumber(L, aValue); });
+        _protected_write(L, registry_reference(), aPath, [L, aValue]() { lua_pushnumber(L, aValue); });
     }
 
     void reference::write(const path &aPath, const std::string &aValue) {
@@ -261,7 +290,7 @@ namespace jfc::lua {
 
         const stack_guard guard(L);
 
-        _write_value(L, registry_reference(), aPath, [L, &aValue]() { lua_pushstring(L, aValue.c_str()); });
+        _protected_write(L, registry_reference(), aPath, [L, &aValue]() { lua_pushlstring(L, aValue.data(), aValue.size()); });
     }
 
     void reference::write(const path &aPath, const std::string::value_type *aValue) {
@@ -269,7 +298,7 @@ namespace jfc::lua {
 
         const stack_guard guard(L);
 
-        _write_value(L, registry_reference(), aPath, [L, &aValue]() { lua_pushstring(L, aValue); });
+        _protected_write(L, registry_reference(), aPath, [L, &aValue]() { lua_pushstring(L, aValue); });
     }
 
     void reference::write(const path &aPath, const data_table &aValue) {
@@ -277,7 +306,7 @@ namespace jfc::lua {
 
         const stack_guard guard(L);
 
-        _write_value(L, registry_reference(), aPath, [L, &aValue]() { aValue.push_to_lua_state(L); });
+        _protected_write(L, registry_reference(), aPath, [L, &aValue]() { aValue.push_to_lua_state(L); });
     }
 
     template <typename value_type>
@@ -314,7 +343,10 @@ namespace jfc::lua {
 
     template <typename value_type>
     std::optional<std::vector<value_type>> reference::read_vector(const path &aPath) const {
-        const auto found = read_data_table(aPath);
+        std::optional<data_table> found;
+
+        try { found = read_data_table(aPath); }
+        catch (const exception &) { return {}; }
 
         if (!found) return {};
 
@@ -360,17 +392,38 @@ namespace jfc::lua {
             if (lua_pcall(L, static_cast<int>(aArguments.size()), LUA_MULTRET, 0) != LUA_OK)
                 return _to_string(L, -1).value_or("lua reported an error it could not describe");
 
-            for (int i = base; i <= lua_gettop(L); ++i)
-                if (!jfc::lua::detail::to_param(L, i, aResults))
-                {
+            for (int i = base; i <= lua_gettop(L); ++i) {
+                const auto unconverted = [&](const std::string &aWhy) -> error_type {
                     aResults.clear();
 
                     return aWhat + " returned a " + lua_typename(L, lua_type(L, i))
-                        + " in position " + std::to_string(i - base + 1)
-                        + ", which cannot cross into c++";
+                        + " in position " + std::to_string(i - base + 1) + aWhy;
+                };
+
+                try {
+                    if (!jfc::lua::detail::to_param(L, i, aResults)) return unconverted(", which cannot cross into c++");
                 }
+                catch (const exception &e) { return unconverted(" that cannot cross into c++: " + std::string(e.what())); }
+            }
 
             return {};
+        }
+
+        template <typename find_type>
+        [[nodiscard]] error_type _protected_invoke(lua_State *const L, const std::string &aWhat,
+            const value_list_type &aArguments, value_list_type &aResults, find_type &&aFind) {
+            error_type error;
+
+            if (const auto raised = detail::protect(L, [&](lua_State *) {
+                if (const auto missing = aFind()) error = *missing;
+                else error = _invoke(L, aWhat, aArguments, aResults);
+            })) {
+                aResults.clear();
+
+                return raised;
+            }
+
+            return error;
         }
     }
 
@@ -390,11 +443,13 @@ namespace jfc::lua {
 
         where << aPath;
 
-        if (!lua_checkstack(L, 2)) return "the lua stack cannot grow enough to make this call";
+        const auto what = where.str();
 
-        if (!_read_value(L, registry_reference(), aPath)) return where.str() + " does not resolve";
+        return _protected_invoke(L, what, aArguments, aResults, [&]() -> error_type {
+            if (!_read_value(L, registry_reference(), aPath)) return what + " does not resolve";
 
-        return _invoke(L, where.str(), aArguments, aResults);
+            return {};
+        });
     }
 
     error_type reference::call(const value_list_type &aArguments,
@@ -409,11 +464,11 @@ namespace jfc::lua {
 
         aResults.clear();
 
-        if (!lua_checkstack(L, 2)) return "the lua stack cannot grow enough to make this call";
+        return _protected_invoke(L, "the reference", aArguments, aResults, [&]() -> error_type {
+            lua_rawgeti(L, LUA_REGISTRYINDEX, registry_reference());
 
-        lua_rawgeti(L, LUA_REGISTRYINDEX, registry_reference());
-
-        return _invoke(L, "the reference", aArguments, aResults);
+            return {};
+        });
     }
 
     error_type reference::call(const value_list_type &aArguments) {
@@ -433,11 +488,17 @@ namespace jfc::lua {
 
         const stack_guard guard(L);
 
-        if (!_read_value(L, registry_reference(), aPath) || lua_isnil(L, -1)) return {};
+        std::optional<reference> val;
 
-        lua_pushvalue(L, -1);
+        if (!_protected_read(L, registry_reference(), aPath, [&] {
+            if (lua_isnil(L, -1)) return;
 
-        return reference(m_pState, luaL_ref(L, LUA_REGISTRYINDEX));
+            lua_pushvalue(L, -1);
+
+            val = reference(m_pState, luaL_ref(L, LUA_REGISTRYINDEX));
+        })) return {};
+
+        return val;
     }
 
     void reference::write(const path &aPath, const userdata &aValue) {
@@ -445,7 +506,7 @@ namespace jfc::lua {
 
         const stack_guard guard(L);
 
-        _write_value(L, registry_reference(), aPath, [L, &aValue]() { detail::push_userdata(L, aValue); });
+        _protected_write(L, registry_reference(), aPath, [L, &aValue]() { detail::push_userdata(L, aValue); });
     }
 
     std::optional<userdata> reference::_read_userdata(const path &aPath) const {
@@ -453,11 +514,13 @@ namespace jfc::lua {
 
         const stack_guard guard(L);
 
-        if (!_read_value(L, registry_reference(), aPath)) return {};
+        std::optional<userdata> val;
 
-        if (const auto *const held = detail::to_userdata(L, -1)) return *held;
+        if (!_protected_read(L, registry_reference(), aPath, [&] {
+            if (const auto *const held = detail::to_userdata(L, -1)) val = *held;
+        })) return {};
 
-        return {};
+        return val;
     }
 
     std::optional<userdata> reference::read_userdata(const path &aPath) const
@@ -506,7 +569,11 @@ namespace jfc::lua {
                         + lua_typename(p, lua_type(p, i)) + ", which cannot cross into c++");
                 }
 
-                auto return_values = pImpl->closure(std::move(args));
+                auto return_values = [&] {
+                    try { return pImpl->closure(std::move(args)); }
+                    catch (const std::exception &) { throw; }
+                    catch (...) { throw exception("a registered function threw something that is not a std::exception"); }
+                }();
 
                 lua_settop(p, 0);
 
@@ -521,13 +588,6 @@ namespace jfc::lua {
             }
             catch (const std::exception &e) {
                 std::snprintf(failure, sizeof failure, "%s", e.what());
-
-                failed = true;
-            }
-            catch (...)
-            {
-                std::snprintf(failure, sizeof failure, "%s",
-                    "a registered function threw something that is not a std::exception");
 
                 failed = true;
             }
@@ -557,7 +617,7 @@ namespace jfc::lua {
 
         name << aName;
 
-        _write_value(L, registry_reference(), aName, [L, &aClosure, trampoline, &name]() {
+        _protected_write(L, registry_reference(), aName, [L, &aClosure, trampoline, &name]() {
             auto *const pStorage = static_cast<registered_closure *>(
                 lua_newuserdata(L, sizeof(registered_closure)));
 
@@ -585,16 +645,28 @@ namespace jfc::lua {
 
         const root_scope root(L, registry_reference());
 
-        if (!lua_checkstack(L, 3)) return {};
+        std::optional<reference> thread;
 
-        if (!_read_value(L, registry_reference(), aFunction) || !lua_isfunction(L, -1)) return {};
+        if (const auto error = detail::protect(L, [&](lua_State *) {
+            if (!_read_value(L, registry_reference(), aFunction) || !lua_isfunction(L, -1)) return;
 
-        lua_State *const thread = lua_newthread(L);
+            lua_State *const pThread = lua_newthread(L);
 
-        lua_pushvalue(L, -2);
-        lua_xmove(L, thread, 1);
+            lua_pushvalue(L, -2);
+            lua_xmove(L, pThread, 1);
 
-        return coroutine(reference(m_pState, luaL_ref(L, LUA_REGISTRYINDEX)), m_InstructionBudget);
+            thread = reference(m_pState, luaL_ref(L, LUA_REGISTRYINDEX));
+        })) {
+            std::ostringstream where;
+
+            where << aFunction;
+
+            throw exception("could not make a coroutine of " + where.str() + ": " + *error);
+        }
+
+        if (!thread) return {};
+
+        return coroutine(std::move(*thread), m_InstructionBudget);
     }
 
     environment::error_type environment::run(const std::string &aLuaScript) {

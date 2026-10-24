@@ -57,10 +57,12 @@ namespace {
 
         const std::size_t prospective = limits->used - held + aNewSize;
 
-        if (limits->cap && prospective > limits->cap) return nullptr;
+        if (!limits->unbudgeted) {
+            if (limits->cap && prospective > limits->cap) return nullptr;
 
-        if (limits->growthCap && limits->depth > 0 && prospective > limits->usedAtRunStart
-            && prospective - limits->usedAtRunStart > limits->growthCap) return nullptr;
+            if (limits->growthCap && limits->depth > 0 && prospective > limits->usedAtRunStart
+                && prospective - limits->usedAtRunStart > limits->growthCap) return nullptr;
+        }
 
         void *const allocated = std::realloc(p, aNewSize);
 
@@ -265,9 +267,14 @@ namespace jfc::lua {
             return 0;
         });
 
-        luaL_openlibs(L);
-
         const stack_guard guard(L);
+
+        if (const auto error = detail::protect(L, [&](lua_State *) { _set_up(L); }))
+            throw exception("could not set up a lua state: " + *error);
+    }
+
+    void interpreter::_set_up(lua_State *const L) {
+        luaL_openlibs(L);
 
         lua_getglobal(L, "jit");
 
@@ -310,20 +317,25 @@ namespace jfc::lua {
 
         if (aPolicy.INSTRUCTION_BUDGET.value_or(0)) _ensure_instruction_hook(L, m_pLimits.get());
 
-        lua_newtable(L);
+        int root = LUA_NOREF;
 
-        lua_newtable(L);
-        lua_rawgeti(L, LUA_REGISTRYINDEX, aPolicy.LIBRARY == standard_library::safe
-            ? m_SafeLibraryReference
-            : m_StandardLibraryReference);
-        lua_setfield(L, -2, "__index");
-        lua_setmetatable(L, -2);
+        if (const auto error = detail::protect(L, [&](lua_State *) {
+            lua_newtable(L);
 
-        lua_pushvalue(L, -1);
-        lua_setfield(L, -2, "_G");
+            lua_newtable(L);
+            lua_rawgeti(L, LUA_REGISTRYINDEX, aPolicy.LIBRARY == standard_library::safe
+                ? m_SafeLibraryReference
+                : m_StandardLibraryReference);
+            lua_setfield(L, -2, "__index");
+            lua_setmetatable(L, -2);
 
-        return environment_shared_ptr_type(
-            new environment(m_pState, luaL_ref(L, LUA_REGISTRYINDEX), aPolicy.INSTRUCTION_BUDGET));
+            lua_pushvalue(L, -1);
+            lua_setfield(L, -2, "_G");
+
+            root = luaL_ref(L, LUA_REGISTRYINDEX);
+        })) throw exception("could not make an environment: " + *error);
+
+        return environment_shared_ptr_type(new environment(m_pState, root, aPolicy.INSTRUCTION_BUDGET));
     }
 
     std::optional<double> interpreter::read_number(const path &aPath) const

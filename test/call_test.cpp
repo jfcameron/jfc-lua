@@ -4,6 +4,7 @@
 
 #include <jfc/lua.h>
 
+#include <optional>
 #include <stdexcept>
 #include <string>
 
@@ -220,5 +221,66 @@ TEST_CASE("a call goes through the same guards as a run", "[call]") {
 
         REQUIRE_FALSE(two->call("who", {}, results).has_value());
         REQUIRE(std::get<std::string>(results.at(0)) == "two");
+    }
+}
+
+TEST_CASE("a returned table holding what cannot cross is an error, not an exception", "[call]") {
+    interpreter interp;
+
+    auto env = interp.make_environment();
+
+    REQUIRE_FALSE(env->run("function f() return 1, { g = print } end").has_value());
+
+    value_list_type results;
+
+    std::optional<std::string> error;
+
+    REQUIRE_NOTHROW(error = env->call("f", {}, results));
+    REQUIRE(error.has_value());
+
+    INFO("message was: " << *error);
+
+    REQUIRE(error->find("position 2") != std::string::npos);
+    REQUIRE(error->find("g holds a function") != std::string::npos);
+    REQUIRE(results.empty());
+
+    SECTION("through a reference too") {
+        auto f = env->read_reference("f");
+
+        REQUIRE(f);
+        REQUIRE_NOTHROW(error = f->call({}, results));
+        REQUIRE(error.has_value());
+        REQUIRE(results.empty());
+    }
+}
+
+TEST_CASE("a string with a NUL in it crosses whole, every way", "[call]") {
+    const std::string withNul("a\0b", 3);
+
+    interpreter interp;
+
+    auto env = interp.make_environment();
+
+    REQUIRE_FALSE(env->run("function echo(s) return s, #s end").has_value());
+
+    SECTION("written and read") {
+        env->write("s", withNul);
+
+        REQUIRE(env->read_string("s") == withNul);
+    }
+
+    SECTION("as an argument and a result") {
+        value_list_type results;
+
+        REQUIRE_FALSE(env->call("echo", {withNul}, results).has_value());
+        REQUIRE(std::get<std::string>(results.at(0)) == withNul);
+        REQUIRE(std::get<double>(results.at(1)) == 3);
+    }
+
+    SECTION("as a key in a path") {
+        env->write(path{"t", withNul}, 1.0);
+
+        REQUIRE_FALSE(env->run("for k in pairs(t) do length = #k end").has_value());
+        REQUIRE(env->read_number("length") == 3);
     }
 }

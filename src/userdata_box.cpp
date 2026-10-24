@@ -15,7 +15,6 @@
 #include <vector>
 
 namespace {
-    //! the metatable of a box whose type has none registered
     constexpr const char *GENERIC_METATABLE = "jfc.lua.userdata";
 
     const char OURS = 0;    //!< marks every metatable of ours
@@ -178,7 +177,11 @@ namespace {
                     + lua_typename(p, lua_type(p, i)) + ", which cannot cross into c++");
             }
 
-            auto returned = (*pMethod)(object, std::move(args));
+            auto returned = [&] {
+                try { return (*pMethod)(object, std::move(args)); }
+                catch (const std::exception &) { throw; }
+                catch (...) { throw jfc::lua::exception("a method threw something that is not a std::exception"); }
+            }();
 
             lua_settop(p, 0);
 
@@ -200,12 +203,6 @@ namespace {
         }
         catch (const std::exception &e) {
             std::snprintf(failure, sizeof failure, "%s", e.what());
-
-            failed = true;
-        }
-        catch (...) {
-            std::snprintf(failure, sizeof failure, "%s",
-                "a method threw something that is not a std::exception");
 
             failed = true;
         }
@@ -344,57 +341,59 @@ namespace jfc::lua {
 
         const stack_guard guard(L);
 
-        lua_newtable(L); 
-        _fill_common(L);
+        if (const auto error = detail::protect(L, [&](lua_State *) {
+            lua_newtable(L);
+            _fill_common(L);
 
-        const int metatable = lua_gettop(L);
-
-        lua_newtable(L); 
-
-        const int methods = lua_gettop(L);
-
-        for (auto &[name, method] : aMethods) {
-            auto *const pStorage = static_cast<untyped_method_type *>(
-                lua_newuserdata(L, sizeof(untyped_method_type)));
-
-            new (pStorage) untyped_method_type(std::move(method));
+            const int metatable = lua_gettop(L);
 
             lua_newtable(L);
-            lua_pushcfunction(L, _destroy_method);
-            lua_setfield(L, -2, "__gc");
-            lua_setmetatable(L, -2);
 
-            _push_key(L, aTypeKey);
+            const int methods = lua_gettop(L);
+
+            for (auto &[name, method] : aMethods) {
+                auto *const pStorage = static_cast<untyped_method_type *>(
+                    lua_newuserdata(L, sizeof(untyped_method_type)));
+
+                new (pStorage) untyped_method_type(std::move(method));
+
+                lua_newtable(L);
+                lua_pushcfunction(L, _destroy_method);
+                lua_setfield(L, -2, "__gc");
+                lua_setmetatable(L, -2);
+
+                _push_key(L, aTypeKey);
+                lua_pushstring(L, aName.c_str());
+                lua_pushstring(L, name.c_str());
+                lua_pushstring(L, (aName + ":" + name).c_str());
+
+                lua_pushcclosure(L, _method_trampoline, 5);
+
+                lua_setfield(L, name == CALL ? metatable : methods, name.c_str());
+            }
+
+            _push_key(L, &METHODS);
+            lua_pushvalue(L, methods);
+            lua_rawset(L, metatable);
+
+            lua_pushvalue(L, methods);
+            lua_pushcclosure(L, _index, 1);
+            lua_setfield(L, metatable, "__index");
+
+            lua_pushvalue(L, methods);
             lua_pushstring(L, aName.c_str());
-            lua_pushstring(L, name.c_str());
-            lua_pushstring(L, (aName + ":" + name).c_str());
+            lua_pushcclosure(L, _newindex, 2);
+            lua_setfield(L, metatable, "__newindex");
 
-            lua_pushcclosure(L, _method_trampoline, 5);
+            lua_pushstring(L, aName.c_str());
+            lua_pushcclosure(L, _tostring, 1);
+            lua_setfield(L, metatable, "__tostring");
 
-            lua_setfield(L, name == CALL ? metatable : methods, name.c_str());
-        }
-
-        _push_key(L, &METHODS);
-        lua_pushvalue(L, methods);
-        lua_rawset(L, metatable);
-
-        lua_pushvalue(L, methods);
-        lua_pushcclosure(L, _index, 1);
-        lua_setfield(L, metatable, "__index");
-
-        lua_pushvalue(L, methods);
-        lua_pushstring(L, aName.c_str());
-        lua_pushcclosure(L, _newindex, 2);
-        lua_setfield(L, metatable, "__newindex");
-
-        lua_pushstring(L, aName.c_str());
-        lua_pushcclosure(L, _tostring, 1);
-        lua_setfield(L, metatable, "__tostring");
-
-        _push_registry_table(L, &TYPES, nullptr);
-        _push_key(L, aTypeKey);
-        lua_pushvalue(L, metatable);
-        lua_rawset(L, -3);
+            _push_registry_table(L, &TYPES, nullptr);
+            _push_key(L, aTypeKey);
+            lua_pushvalue(L, metatable);
+            lua_rawset(L, -3);
+        })) throw exception("could not register the type " + aName + ": " + *error);
     }
 
     reference interpreter::hold(const userdata &aObject) {
@@ -402,8 +401,14 @@ namespace jfc::lua {
 
         const stack_guard guard(L);
 
-        detail::push_userdata(L, aObject);
+        int held = LUA_NOREF;
 
-        return reference(m_pState, luaL_ref(L, LUA_REGISTRYINDEX));
+        if (const auto error = detail::protect(L, [&](lua_State *) {
+            detail::push_userdata(L, aObject);
+
+            held = luaL_ref(L, LUA_REGISTRYINDEX);
+        })) throw exception("could not hold an object: " + *error);
+
+        return reference(m_pState, held);
     }
 }

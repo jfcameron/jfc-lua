@@ -202,7 +202,7 @@ TEST_CASE("a nested run does not refill the caller's budget", "[limits]") {
     // reached, and asserting inside it would bury the suite's assertion count in identical records.
     int ran = 0, refused = 0;
 
-    outer->register_function("tick", [inner, &ran, &refused](value_list_type) -> value_list_type {
+    outer->register_function("tick", [inner = inner.get(), &ran, &refused](value_list_type) -> value_list_type {
         if (inner->run("ticks = (ticks or 0) + 1").has_value()) ++refused;
         else ++ran;
 
@@ -251,7 +251,7 @@ TEST_CASE("a caller that says stop is asked once", "[limits]") {
     auto outer = interp.make_environment();
     auto inner = interp.make_environment();
 
-    outer->register_function("tick", [inner](value_list_type) -> value_list_type {
+    outer->register_function("tick", [inner = inner.get()](value_list_type) -> value_list_type {
         (void)inner->run("ticks = (ticks or 0) + 1");
 
         return {};
@@ -457,7 +457,7 @@ TEST_CASE("the outermost run's instruction budget governs a nested one", "[limit
 
     int served = 0;
 
-    npc->register_function("load_something", [loader, &served](value_list_type) -> value_list_type {
+    npc->register_function("load_something", [loader = loader.get(), &served](value_list_type) -> value_list_type {
         if (!loader->run("work = (work or 0) + 1").has_value()) ++served;
 
         return {};

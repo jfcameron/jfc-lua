@@ -1,5 +1,7 @@
 // © Joseph Cameron - All Rights Reserved
 
+#include <jfc/lua/internal.h>
+
 #include <jfc/lua/reference.h>
 
 #include <lua.hpp>
@@ -11,7 +13,17 @@ namespace jfc::lua {
     : m_pState(std::move(aState))
     , m_pReference(new int(aRegistryReference),
         [state = m_pState](const int *const aReference) {
+            void *ud = nullptr;
+
+            lua_getallocf(state.get(), &ud);
+
+            auto *const limits = static_cast<interpreter_limits *>(ud);
+
+            if (limits) limits->unbudgeted = true;
+
             luaL_unref(state.get(), LUA_REGISTRYINDEX, *aReference);
+
+            if (limits) limits->unbudgeted = false;
 
             delete aReference;
         })

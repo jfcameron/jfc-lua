@@ -282,13 +282,13 @@ TEST_CASE("**the same object is the same lua value**", "[userdata][identity]") {
 
 TEST_CASE("**the host holds an object's lua value, and with it the fields scripts set**",
     "[userdata][hold]") {
+    int destroyed = 0;
+
     interpreter lua;
 
     register_label(lua);
 
     auto env = lua.make_environment();
-
-    int destroyed = 0;
 
     auto field = std::make_shared<label>();
 

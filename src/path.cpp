@@ -1,10 +1,11 @@
 // © Joseph Cameron - All Rights Reserved
 
+#include <jfc/lua/internal.h>
+
 #include <jfc/lua/exception.h>
 #include <jfc/lua/key.h>
 #include <jfc/lua/path.h>
 
-#include <cstdlib>
 #include <utility>
 #include <ostream>
 #include <sstream>
@@ -61,17 +62,13 @@ namespace {
             if (token == "true") parsed = true;
             else if (token == "false") parsed = false;
             else {
-                const char *const first = token.c_str();
+                const auto number = jfc::lua::detail::read_number(token);
 
-                char *last = nullptr;
-
-                const double number = std::strtod(first, &last);
-
-                if (last != first + token.size() || token.empty())
+                if (!number || number->second != token.size())
                     throw _malformed(aPath, "\"" + token +
                         "\" is not a number, true, false, or a quoted string");
 
-                parsed = number;
+                parsed = number->first;
             }
         }
 
@@ -180,7 +177,13 @@ namespace jfc::lua {
             else if (segment.is_boolean()) {
                 stream << "[" << (std::get<bool>(segment.value()) ? "true" : "false") << "]";
             }
-            else stream << "[" << std::get<double>(segment.value()) << "]";
+            else {
+                stream << "[";
+
+                detail::write_number(stream, std::get<double>(segment.value()));
+
+                stream << "]";
+            }
         }
 
         out << stream.str();

@@ -4,6 +4,7 @@
 
 #include <jfc/lua.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -174,4 +175,17 @@ TEST_CASE("the interpreter's own globals do arrays too", "[array]") {
     interp.write("spawns", std::vector<double>{1, 2, 3});
 
     REQUIRE(interp.read_vector<double>("spawns") == std::vector<double>{1, 2, 3});
+}
+
+TEST_CASE("an array holding what a data table cannot reads as nothing, not an exception", "[array]") {
+    interpreter interp;
+
+    auto env = interp.make_environment();
+
+    REQUIRE_FALSE(env->run("v = { 1, 2, print }").has_value());
+
+    std::optional<std::vector<double>> read;
+
+    REQUIRE_NOTHROW(read = env->read_vector<double>("v"));
+    REQUIRE_FALSE(read.has_value());
 }

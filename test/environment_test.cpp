@@ -325,7 +325,7 @@ TEST_CASE("an environment can be entered from inside another", "[environment]") 
     REQUIRE_FALSE(npc->run("owner = 'the npc'").has_value());
 
     SECTION("the outer environment is still in force after the inner call returns") {
-        npc->register_function("open_menu", [menu](value_list_type) -> value_list_type {
+        npc->register_function("open_menu", [menu = menu.get()](value_list_type) -> value_list_type {
             const auto error = menu->run("opened = true");
 
             REQUIRE_FALSE(error.has_value());
@@ -346,7 +346,7 @@ TEST_CASE("an environment can be entered from inside another", "[environment]") 
     }
 
     SECTION("a value read from the inner environment crosses without dragging its globals along") {
-        npc->register_function("ask_menu", [menu](value_list_type) -> value_list_type {
+        npc->register_function("ask_menu", [menu = menu.get()](value_list_type) -> value_list_type {
             return {menu->read_string("owner").value_or("<nothing>")};
         });
 
@@ -359,7 +359,7 @@ TEST_CASE("an environment can be entered from inside another", "[environment]") 
     }
 
     SECTION("code loaded after an inner call still belongs to the outer environment") {
-        npc->register_function("open_menu", [menu](value_list_type) -> value_list_type {
+        npc->register_function("open_menu", [menu = menu.get()](value_list_type) -> value_list_type {
             REQUIRE_FALSE(menu->run("opened = true").has_value());
 
             return {};
@@ -378,13 +378,13 @@ TEST_CASE("an environment can be entered from inside another", "[environment]") 
 
         REQUIRE_FALSE(inner->run("owner = 'the innermost'").has_value());
 
-        menu->register_function("go_deeper", [inner](value_list_type) -> value_list_type {
+        menu->register_function("go_deeper", [inner = inner.get()](value_list_type) -> value_list_type {
             REQUIRE_FALSE(inner->run("reached = owner").has_value());
 
             return {};
         });
 
-        npc->register_function("open_menu", [menu](value_list_type) -> value_list_type {
+        npc->register_function("open_menu", [menu = menu.get()](value_list_type) -> value_list_type {
             REQUIRE_FALSE(menu->run("go_deeper()  seen = owner").has_value());
 
             return {};

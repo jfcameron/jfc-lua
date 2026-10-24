@@ -174,7 +174,7 @@ namespace jfc::lua {
         [[nodiscard]] reference hold(const std::shared_ptr<object_type> &aObject)
             { return hold(userdata::make(aObject)); }
 
-        /// \brief checks for basic synatx errors. 
+        /// \brief checks for basic syntax errors.
         [[nodiscard]] error_type validate_syntax(const std::string &aLuaScript) const;
         
         /// \brief run a script, returns an error if something went wrong
@@ -186,6 +186,9 @@ namespace jfc::lua {
         interpreter(interpreter_policy aPolicy = {});
 
     private:
+        //! the standard library opened, its snapshots taken and the globals made an environment
+        void _set_up(lua_State *L);
+
         void _register_type(std::string aName, const void *aTypeKey,
             std::vector<std::pair<std::string, untyped_method_type>> aMethods);
 
