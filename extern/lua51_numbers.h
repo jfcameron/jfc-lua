@@ -1,4 +1,4 @@
-// © Joseph Cameron - All Rights Reserved
+// © Joseph Cameron - MIT License
 //
 // forced into lobject.c and lvm.c, the two files that turn numbers into text and back. puc lua does
 // both with strtod and sprintf, which take the c locale's decimal point: under one with a comma,

@@ -1,6 +1,8 @@
 # jfc-lua
 A library for embedding Lua in a program. It runs scripts in sandboxed environments and passes values, functions and C++ objects between C++ and Lua. It can be built with either LuaJIT or the reference implementation of Lua 5.1.
 
+API documentation: https://jfcameron.github.io/jfc-lua/
+
 ## Getting Started
 Install cmake 3.21 or greater, and a c++20 compatible compiler
 ```
@@ -18,7 +20,7 @@ ctest --preset linux-gcc
 ```
 The `linux-gcc-demo` preset builds the demo programs instead, and `linux-gcc-lua51` builds against the reference implementation rather than LuaJIT. See `CMakePresets.json` for the full list of supported platforms and compilers. See `.github/workflows/ci.yml` to see exactly how CI runners build it on different platforms.
 
-To use it from another project, add it with `add_subdirectory` and link `jfclua`. The Lua implementation is chosen with `JFC_LUA_BACKEND`, either `luajit` (the default) or `lua51`.
+To use it from another project, add it with `add_subdirectory` and link `jfclua`. The Lua implementation is chosen with `JFC_LUA_BACKEND`, either `luajit` (the default) or `lua51` (the default for Emscripten, iOS, tvOS, watchOS and visionOS, where `luajit` is refused); generation reports which it is.
 
 ## Overview
 ### Entry point
@@ -51,6 +53,6 @@ Any Lua function can be made into a coroutine, which C++ resumes, and which runs
 An interpreter can be given a memory budget for the whole state, a memory budget for how much one run may add to it, and an instruction budget for how much one run may execute. An environment can have an instruction budget of its own. When a script reaches its instruction budget it stops with an error, as it does when allocation goes over a memory budget, unless the program has given a callback that chooses to let it carry on. This stops an infinite loop or a runaway allocation in a script from taking the program down with it. Under LuaJIT, code run under an instruction budget is kept off the JIT, since compiled code is not counted. A call timer can also be set to time every call scripts make into registered functions, to see which of them a script spends its time in.
 
 ## Why Lua 5.1?
-Because it is what LuaJIT implements, and LuaJIT is by far the fastest Lua there is. Its weakness is that its interpreter is machine code, written for x86, ARM, PPC and MIPS, so it has no WebAssembly target, and cannot have one, since a page in a browser cannot write machine code to run. The reference implementation of Lua 5.1 is plain C, and builds anywhere a C compiler does, Emscripten included, so a browser build uses it. CI builds the Emscripten version and runs its tests under node, where the limits work as they do on the desktop.
+Because it is what LuaJIT implements, and LuaJIT is by far the fastest Lua there is. Its weakness is that its interpreter is machine code, written for x86, ARM, PPC and MIPS, so it has no WebAssembly target, and cannot have one, since a page in a browser cannot write machine code to run. The reference implementation of Lua 5.1 is plain C, and builds anywhere a C compiler does, Emscripten included, so a browser build uses it. Apple's devices use it too. LuaJIT runs there without its JIT, which they forbid, and unwinds its errors itself rather than through the C++ runtime, so an error raised while jfc-lua's C++ code holds objects would skip their destructors. The reference implementation is built as C++, so its errors are C++ exceptions and unwind like any other. CI builds the Emscripten version and runs its tests under node, where the limits work as they do on the desktop.
 
 Since both are Lua 5.1, the same scripts run on either, as long as they avoid LuaJIT's own extensions, such as `ffi` and the `bit` library.

@@ -1,4 +1,4 @@
-// © Joseph Cameron - All Rights Reserved
+// © Joseph Cameron - MIT License
 
 #ifndef JFC_LUA_INTERNAL_H
 #define JFC_LUA_INTERNAL_H
@@ -27,6 +27,11 @@
 namespace jfc::lua {
     /// \brief what the allocator and the instruction hook share
     struct interpreter_limits final {
+        //! the allocator the state was made with
+        lua_Alloc innerAlloc{nullptr};
+
+        void *innerData{nullptr};
+
         //! bytes currently held by this state
         std::size_t used{0};
 

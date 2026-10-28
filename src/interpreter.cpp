@@ -1,4 +1,4 @@
-// © Joseph Cameron - All Rights Reserved
+// © Joseph Cameron - MIT License
 
 #include <jfc/lua/internal.h>
 
@@ -51,8 +51,7 @@ namespace {
 
         if (aNewSize == 0) {
             limits->used -= held;
-            std::free(p);
-            return nullptr;
+            return limits->innerAlloc(limits->innerData, p, aOldSize, 0);
         }
 
         const std::size_t prospective = limits->used - held + aNewSize;
@@ -64,7 +63,7 @@ namespace {
                 && prospective - limits->usedAtRunStart > limits->growthCap) return nullptr;
         }
 
-        void *const allocated = std::realloc(p, aNewSize);
+        void *const allocated = limits->innerAlloc(limits->innerData, p, aOldSize, aNewSize);
 
         if (allocated) limits->used = prospective;
 
@@ -249,12 +248,20 @@ namespace jfc::lua {
         m_pLimits->instructionBudget = aPolicy.INSTRUCTION_BUDGET;
         m_pLimits->onExhausted = aPolicy.ON_INSTRUCTION_BUDGET_EXHAUSTED;
 
-        auto *const state = lua_newstate(_capped_alloc, m_pLimits.get());
+        auto *const state = luaL_newstate();
 
         if (!state) throw exception("could not create a lua state");
 
-        m_pState = std::shared_ptr<lua_State>(state,
-            [limits = m_pLimits](lua_State *p) { lua_close(p); });
+        m_pLimits->innerAlloc = lua_getallocf(state, &m_pLimits->innerData);
+        m_pLimits->used = static_cast<std::size_t>(lua_gc(state, LUA_GCCOUNT, 0)) * 1024
+            + static_cast<std::size_t>(lua_gc(state, LUA_GCCOUNTB, 0));
+
+        lua_setallocf(state, _capped_alloc, m_pLimits.get());
+
+        m_pState = std::shared_ptr<lua_State>(state, [limits = m_pLimits](lua_State *p) {
+            lua_setallocf(p, limits->innerAlloc, limits->innerData);
+            lua_close(p);
+        });
 
         auto *L = m_pState.get();
 
