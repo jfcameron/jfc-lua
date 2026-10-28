@@ -3,7 +3,8 @@
 	url = https://github.com/jfcameron/jfc-cmake.git
 [submodule "extern/LuaJIT"]
 	path = extern/LuaJIT
-	url = https://github.com/WohlSoft/LuaJIT.git
+	url = https://github.com/jfcameron/LuaJIT.git
+	branch = jfc-lua
 [submodule "extern/lua51"]
 	path = extern/lua51
 	url = https://github.com/lua/lua

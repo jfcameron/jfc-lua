@@ -1,4 +1,4 @@
-# © Joseph Cameron - All Rights Reserved
+# © Joseph Cameron - MIT License
 
 if (JFC_LUA_BACKEND STREQUAL "luajit")
     add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/LuaJIT")
@@ -41,6 +41,11 @@ elseif (JFC_LUA_BACKEND STREQUAL "lua51")
 
     set_source_files_properties("${_lua_root}/lobject.c" "${_lua_root}/lvm.c" PROPERTIES
         COMPILE_OPTIONS "${_lua_force_numbers}")
+
+    if (_jfc_lua_apple_device)
+        set_source_files_properties("${_lua_root}/loslib.c" PROPERTIES
+            COMPILE_OPTIONS "-include;${CMAKE_CURRENT_LIST_DIR}/lua51_apple_device.h")
+    endif()
 
     target_include_directories(liblua PUBLIC "${_lua_root}")
 

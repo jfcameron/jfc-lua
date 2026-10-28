@@ -1,4 +1,4 @@
-# © Joseph Cameron - All Rights Reserved
+# © Joseph Cameron - MIT License
 
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
@@ -12,7 +12,13 @@ option(JFC_BUILD_DEMO "Build the demo" OFF)
 option(JFC_BUILD_DOCS "Build documentation" OFF)
 option(JFC_BUILD_TESTS "Build unit tests" ${PROJECT_IS_TOP_LEVEL})
 
-if (EMSCRIPTEN)
+set(_jfc_lua_apple_device OFF)
+
+if (CMAKE_SYSTEM_NAME MATCHES "^(iOS|tvOS|watchOS|visionOS)$")
+    set(_jfc_lua_apple_device ON)
+endif()
+
+if (EMSCRIPTEN OR _jfc_lua_apple_device)
     set(_jfc_lua_default_backend "lua51")
 else()
     set(_jfc_lua_default_backend "luajit")
@@ -31,6 +37,15 @@ if (EMSCRIPTEN AND JFC_LUA_BACKEND STREQUAL "luajit")
         "JFC_LUA_BACKEND is \"luajit\", which has no WebAssembly target: LuaJIT's interpreter is "
         "machine code, and a page cannot write any to run. Under emscripten the backend is lua51.")
 endif()
+
+if (_jfc_lua_apple_device AND JFC_LUA_BACKEND STREQUAL "luajit")
+    message(FATAL_ERROR
+        "JFC_LUA_BACKEND is \"luajit\", which is unsafe on ${CMAKE_SYSTEM_NAME}: there LuaJIT has no JIT and unwinds "
+        "its errors internally, so a lua error raised while jfc-lua's c++ frames hold objects skips their destructors. "
+        "On ${CMAKE_SYSTEM_NAME} the backend is lua51, which is built as c++ and unwinds them.")
+endif()
+
+message(STATUS "jfc-lua: the lua backend is ${JFC_LUA_BACKEND}")
 
 if (JFC_LUA_BACKEND STREQUAL "luajit")
     add_definitions(-DJFC_LUA_LUAJIT)
@@ -103,6 +118,10 @@ if (NOT TARGET jfclua)
         )
 
     target_compile_features(jfclua PUBLIC cxx_std_20)
+
+    if (MSVC)
+        target_compile_options(jfclua PRIVATE /EHc-)
+    endif()
 
     target_link_libraries(jfclua PUBLIC ${JFC_LUA_TARGET})
 
