@@ -20,7 +20,9 @@ ctest --preset linux-gcc
 ```
 The `linux-gcc-demo` preset builds the demo programs instead, and `linux-gcc-lua51` builds against the reference implementation rather than LuaJIT. See `CMakePresets.json` for the full list of supported platforms and compilers. See `.github/workflows/ci.yml` to see exactly how CI runners build it on different platforms.
 
-To use it from another project, add it with `add_subdirectory` and link `jfclua`. The Lua implementation is chosen with `JFC_LUA_BACKEND`, either `luajit` (the default) or `lua51` (the default for Emscripten, iOS, tvOS, watchOS and visionOS, where `luajit` is refused); generation reports which it is.
+To use it from another project, add it with `add_subdirectory` and link `jfclua`. The Lua implementation is chosen with `JFC_LUA_BACKEND`, either `luajit` (the default) or `lua51` (Lua 5.1.5, the default for Emscripten, iOS, tvOS, watchOS and visionOS, where `luajit` is refused); generation reports which it is.
+
+The reference backend uses the LuaDist `5.1.5` submodule's `src/` library sources and stock `luaconf.h.orig`, copied to the build directory as `luaconf.h`. It is built as C++, with jfc-lua's numeric conversion and platform settings, independently of LuaDist's build configuration and optional relative-path loader.
 
 ## Overview
 ### Entry point
