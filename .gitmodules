@@ -7,4 +7,4 @@
 	branch = jfc-lua
 [submodule "extern/lua51"]
 	path = extern/lua51
-	url = https://github.com/lua/lua
+	url = https://github.com/LuaDist/lua.git
