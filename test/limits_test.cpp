@@ -4,6 +4,8 @@
 
 #include <jfc/lua.h>
 
+#include <cstddef>
+#include <memory>
 #include <stdexcept>
 #include <string>
 
@@ -99,6 +101,23 @@ TEST_CASE("an instruction budget interrupts a runaway script", "[limits]") {
         REQUIRE_FALSE(other->run("hp = hp - 1").has_value());
         REQUIRE(other->read_number("hp") == 99);
     }
+}
+
+TEST_CASE("an interpreter lets go of its limits when it goes", "[limits]") {
+    const auto owned = std::make_shared<int>(0);
+
+    {
+        interpreter interp(interpreter_policy{
+            0,                                      // MEMORY_BUDGET_IN_BYTES
+            0,                                      // MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN
+            0,                                      // INSTRUCTION_BUDGET
+            [owned](const std::size_t) { return false; }  // ON_INSTRUCTION_BUDGET_EXHAUSTED
+        });
+
+        REQUIRE(owned.use_count() > 1);
+    }
+
+    REQUIRE(owned.use_count() == 1);
 }
 
 TEST_CASE("the callback decides what happens at the budget", "[limits]") {

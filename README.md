@@ -35,6 +35,32 @@ By default an environment can only reach the parts of the standard library that 
 
 Functions registered with an environment are C++ lambdas, and are visible to that environment alone. A C++ exception thrown inside one becomes a Lua error in the script that called it, since a C++ exception cannot unwind through Lua. A registered function lives in the Lua state, so one that holds an environment or reference by `std::shared_ptr` keeps the whole interpreter alive: hold a `std::weak_ptr` instead.
 
+### Typed functions
+A registered function can say what it takes in its own signature, and the library reads and checks the arguments for it:
+
+```cpp
+env->register_function("gas.set", [&](const int aCell, const std::string_view aMixture,
+    const std::optional<double> aPressure) {
+    world.set_gas(aCell, aMixture, aPressure.value_or(1.0));
+});
+```
+
+A call that does not fit is a Lua error naming the function and the argument, such as `gas.set: argument 2 wants a string, got a number`. A number given for an integer must be whole and fit its type, a `std::optional` may be left out or nil, and no more arguments may be given than the function takes. A `std::string_view` needs no copy and is valid for the call. A function can return a `std::tuple` for several results, and an empty `std::optional` is nil.
+
+A `table_view` reads a script's table where it is, for the length of the call, instead of copying it into a data table:
+
+```cpp
+env->register_function("firework", [&](const table_view &aOptions) {
+    launch(aOptions.get_number("height").value_or(10), aOptions.get_table("colour")->get_number("red").value_or(1));
+});
+```
+
+A table it reads may hold anything, since only what is asked for is looked at, and no metamethods run. A nested view gives its place on the Lua stack back when it is destroyed. Use `to_data_table` to keep the contents.
+
+A `function_reference` is a function the script passed, to call during the call or to keep and call later. It runs in the environment that made it, and under the instruction budget of the environment it was given to. A `reference` takes any value but nil in the same way, so a table can be kept without a copy, and read later as it is by then. Either can be returned. Keeping one inside something Lua owns, such as a registered closure's captures, keeps the interpreter's state alive for good.
+
+These are faster than a function taking a value list, which remains the way to write a function whose arguments are decided at run time. Both share the same exception handling and call timer. Methods of bound types take value lists.
+
 ### Paths
 Values are read and written by path, in the same form Lua uses: `"player.hitbox.bounds.x"`, `"names[1]"`. A path can also be written out as its keys, `{"names", 1}`, for one assembled at runtime.
 

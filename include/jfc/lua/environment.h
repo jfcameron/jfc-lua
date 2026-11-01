@@ -7,6 +7,7 @@
 #include <jfc/lua/path.h>
 #include <jfc/lua/reference.h>
 #include <jfc/lua/data_table.h>
+#include <jfc/lua/typed_call.h>
 #include <jfc/lua/types.h>
 #include <jfc/lua/userdata.h>
 
@@ -15,6 +16,8 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -64,8 +67,26 @@ namespace jfc::lua
         /// \brief registers a closure (c++ lambda with captured data) into this environment alone
         void register_function(const path &aName, closure_type aClosure);
 
+        /// \brief registers a function that says what it takes in its own signature
+        ///
+        /// Its arguments are read from the script as it asks, and a call that does not fit is an error naming the
+        /// function and the argument. A whole number must fit the integer type asked for. A std::optional may be left
+        /// out or nil. No more arguments may be given than it takes. A std::string_view or a table_view is valid for the
+        /// call, and a function_reference or a reference can be kept. Results may be a std::tuple for several, and a
+        /// std::optional is nil when empty.
+        template <typename function_type>
+        requires (!std::is_convertible_v<function_type, closure_type>)
+        void register_function(const path &aName, function_type &&aFunction)
+            { _register_typed(aName, detail::make_typed_closure(std::forward<function_type>(aFunction)), false); }
+
         /// \brief registers a closure that suspends the coroutine calling it
         void register_yielding_function(const path &aName, closure_type aClosure);
+
+        /// \brief registers a function like register_function's, that suspends the coroutine calling it
+        template <typename function_type>
+        requires (!std::is_convertible_v<function_type, closure_type>)
+        void register_yielding_function(const path &aName, function_type &&aFunction)
+            { _register_typed(aName, detail::make_typed_closure(std::forward<function_type>(aFunction)), true); }
 
         /// \brief the function at aFunction, ready to run as a coroutine against this environment
         [[nodiscard]] std::optional<coroutine> make_coroutine(const path &aFunction);
@@ -91,6 +112,9 @@ namespace jfc::lua
 
         //! registers aClosure at aName, yielding its results if aYields. \see register_function
         void _register(const path &aName, closure_type aClosure, bool aYields);
+
+        //! the same for a typed function
+        void _register_typed(const path &aName, detail::typed_closure_type aClosure, bool aYields);
 
         std::optional<std::size_t> m_InstructionBudget;
     };

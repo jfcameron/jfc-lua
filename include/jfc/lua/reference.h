@@ -131,14 +131,43 @@ namespace jfc::lua
         /// \brief the bound object at aPath
         [[nodiscard]] std::optional<userdata> _read_userdata(const path &aPath) const;
 
+        /// \brief call the referenced value, under aInstructionBudget if this is the outermost run
+        [[nodiscard]] error_type _call(const value_list_type &aArguments, value_list_type &aResults,
+            std::optional<std::size_t> aInstructionBudget);
+
     private:
         friend class environment;
         friend class interpreter;
         friend class coroutine;
+        friend class detail::call_frame;
 
         std::shared_ptr<lua_State> m_pState;
 
         std::shared_ptr<const int> m_pReference;
+    };
+
+    /// \brief a function a script gave a typed function, to call now or to keep
+    ///
+    /// It runs in the environment it was made in, under the instruction budget of the environment it was given to.
+    ///
+    /// \warning it keeps the interpreter's state alive, so keeping one inside something lua owns, such as a registered
+    /// closure's captures, keeps both for good
+    class function_reference final : public reference
+    {
+    public:
+        /// \brief call the function
+        [[nodiscard]] error_type call(const value_list_type &aArguments, value_list_type &aResults);
+
+        /// \brief call the function, discarding whatever it returns
+        [[nodiscard]] error_type call(const value_list_type &aArguments = {});
+
+    private:
+        friend class detail::call_frame;
+
+        function_reference(std::shared_ptr<lua_State> aState, const int aRegistryReference,
+            const std::optional<std::size_t> aInstructionBudget);
+
+        std::optional<std::size_t> m_InstructionBudget;
     };
 }
 

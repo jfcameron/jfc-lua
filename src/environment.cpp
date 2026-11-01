@@ -10,8 +10,6 @@
 #include <jfc/lua/userdata.h>
 #include <jfc/lua/data_table.h>
 
-#include <chrono>
-#include <cstdio>
 #include <functional>
 #include <new>
 #include <optional>
@@ -73,7 +71,7 @@ void jfc::lua::detail::push_param(lua_State *const L,
     }, aValue);
 }
 
-static void _push_key(lua_State *const L, const jfc::lua::key &aKey) {
+void jfc::lua::detail::push_key(lua_State *const L, const jfc::lua::key &aKey) {
     std::visit([L](auto &&aHeld) {
         using value_type = std::decay_t<decltype(aHeld)>;
 
@@ -93,7 +91,7 @@ static bool _read_value(lua_State *L, const int aRoot, const jfc::lua::path &aPa
             return false;
         }
 
-        _push_key(L, aPath[i]);
+        jfc::lua::detail::push_key(L, aPath[i]);
 
         lua_gettable(L, -2);
 
@@ -114,7 +112,7 @@ static void _write_value(lua_State *L, const int aRoot, const jfc::lua::path &aP
     if (!lua_istable(L, container)) {
         if (aPath.empty()) return;
 
-        _push_key(L, aPath[0]);
+        jfc::lua::detail::push_key(L, aPath[0]);
 
         if (!jfc::lua::detail::push_field_table(L, container, lua_gettop(L))) return;
 
@@ -122,13 +120,13 @@ static void _write_value(lua_State *L, const int aRoot, const jfc::lua::path &aP
     }
 
     for (std::size_t i = 0; i + 1 < aPath.size(); ++i) {
-        _push_key(L, aPath[i]);
+        jfc::lua::detail::push_key(L, aPath[i]);
         lua_rawget(L, container);
 
         if (!lua_istable(L, -1)) {
             lua_pop(L, 1);
 
-            _push_key(L, aPath[i]);
+            jfc::lua::detail::push_key(L, aPath[i]);
             lua_gettable(L, container);
 
             const bool inheritedATable = lua_istable(L, -1);
@@ -144,7 +142,7 @@ static void _write_value(lua_State *L, const int aRoot, const jfc::lua::path &aP
                 lua_setmetatable(L, -2);
             }
 
-            _push_key(L, aPath[i]);
+            jfc::lua::detail::push_key(L, aPath[i]);
             lua_pushvalue(L, -2);
             lua_settable(L, container);
 
@@ -156,7 +154,7 @@ static void _write_value(lua_State *L, const int aRoot, const jfc::lua::path &aP
 
     aPushValueFunctor();
 
-    _push_key(L, aPath[aPath.size() - 1]);
+    jfc::lua::detail::push_key(L, aPath[aPath.size() - 1]);
     lua_pushvalue(L, -2);
 
     lua_settable(L, container);
@@ -452,13 +450,16 @@ namespace jfc::lua {
         });
     }
 
-    error_type reference::call(const value_list_type &aArguments,
-        value_list_type &aResults) {
+    error_type reference::call(const value_list_type &aArguments, value_list_type &aResults)
+        { return _call(aArguments, aResults, {}); }
+
+    error_type reference::_call(const value_list_type &aArguments, value_list_type &aResults,
+        const std::optional<std::size_t> aInstructionBudget) {
         auto *L = state();
 
         const stack_guard guard(L);
 
-        const budget_scope budget(L, {});
+        const budget_scope budget(L, aInstructionBudget);
 
         if (budget.aborted()) return "script exceeded its instruction budget";
 
@@ -532,70 +533,62 @@ namespace jfc::lua {
             std::string name;
         };
 
-        template <bool yields>
+        struct registered_typed_closure final {
+            detail::typed_closure_type closure;
+            std::string name;
+            std::optional<std::size_t> instructionBudget;
+        };
+
         int _closure_trampoline(lua_State *pState) {
-            if constexpr (yields) {
-                const bool mainThread = lua_pushthread(pState) == 1;
+            auto *const pImpl = static_cast<registered_closure *>(lua_touserdata(pState, lua_upvalueindex(1)));
 
-                lua_pop(pState, 1);
+            return detail::bound_call(pState, 1, pImpl->name, "a registered function",
+                [pImpl](value_list_type aArguments) { return pImpl->closure(std::move(aArguments)); });
+        }
 
-                if (mainThread) return luaL_error(pState, "%s", "this function waits, and only a "
-                    "coroutine can wait: call it from one, not from a plain call or run");
+        int _typed_closure_trampoline(lua_State *pState) {
+            auto *const pImpl = static_cast<registered_typed_closure *>(lua_touserdata(pState, lua_upvalueindex(1)));
+
+            return detail::guarded_call(pState, pImpl->name, [pImpl, pState] {
+                detail::call_frame frame(pState, pImpl->name, pImpl->instructionBudget);
+
+                return pImpl->closure(frame);
+            });
+        }
+
+        template <lua_CFunction call>
+        int _yielding_trampoline(lua_State *pState) {
+            const bool mainThread = lua_pushthread(pState) == 1;
+
+            lua_pop(pState, 1);
+
+            if (mainThread) return luaL_error(pState, "%s", "this function waits, and only a "
+                "coroutine can wait: call it from one, not from a plain call or run");
+
+            return lua_yield(pState, call(pState));
+        }
+
+        /// \brief pushes a c function that keeps a held_type made of aFields, in a userdata whose metatable aMetatable
+        /// names. It is made only once the userdata exists, since making that can raise.
+        template <typename held_type, typename... field_types>
+        void _push_closure(lua_State *const L, const char *const aMetatable, const lua_CFunction aTrampoline,
+            const field_types &...aFields) {
+            auto *const pStorage = static_cast<held_type *>(lua_newuserdata(L, sizeof(held_type)));
+
+            new (pStorage) held_type{aFields...};
+
+            if (luaL_newmetatable(L, aMetatable)) {
+                lua_pushcfunction(L, [](lua_State *pState) {
+                    static_cast<held_type *>(lua_touserdata(pState, 1))->~held_type();
+                    return 0;
+                });
+
+                lua_setfield(L, -2, "__gc");
             }
 
-            char failure[256] = {};
+            lua_setmetatable(L, -2);
 
-            bool failed = false;
-
-            int results = 0;
-
-            try {
-                auto *pImpl = static_cast<registered_closure *>(lua_touserdata(pState, lua_upvalueindex(1)));
-
-                void *ud = nullptr;
-
-                lua_getallocf(pState, &ud);
-
-                const auto *const pLimits = static_cast<const interpreter_limits *>(ud);
-                const bool timed = pLimits && pLimits->callTimer;
-                const auto began = timed ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-
-                value_list_type args;
-
-                for (int i(1); i <= lua_gettop(pState); ++i) {
-                    if (jfc::lua::detail::to_param(pState, i, args)) continue;
-
-                    throw exception("argument " + std::to_string(i) + " is a "
-                        + lua_typename(pState, lua_type(pState, i)) + ", which cannot cross into c++");
-                }
-
-                auto return_values = [&] {
-                    try { return pImpl->closure(std::move(args)); }
-                    catch (const std::exception &) { throw; }
-                    catch (...) { throw exception("a registered function threw something that is not a std::exception"); }
-                }();
-
-                lua_settop(pState, 0);
-
-                if (!lua_checkstack(pState, static_cast<int>(return_values.size())))
-                    throw exception("the lua stack cannot grow enough to return this many values");
-
-                for (const auto &val : return_values) jfc::lua::detail::push_param(pState, val);
-
-                results = static_cast<int>(return_values.size());
-
-                if (timed) pLimits->callTimer(pImpl->name, std::chrono::steady_clock::now() - began);
-            }
-            catch (const std::exception &e) {
-                std::snprintf(failure, sizeof failure, "%s", e.what());
-
-                failed = true;
-            }
-
-            if (failed) return luaL_error(pState, "%s", failure);
-
-            if constexpr (yields) return lua_yield(pState, results);
-            else return results;
+            lua_pushcclosure(L, aTrampoline, 1);
         }
     }
 
@@ -611,30 +604,36 @@ namespace jfc::lua {
         const stack_guard guard(L);
         const root_scope root(L, registry_reference());
 
-        const auto trampoline = aYields ? _closure_trampoline<true> : _closure_trampoline<false>;
+        const auto trampoline = aYields ? _yielding_trampoline<_closure_trampoline> : _closure_trampoline;
 
-        std::ostringstream name;
+        std::ostringstream where;
 
-        name << aName;
+        where << aName;
 
-        _protected_write(L, registry_reference(), aName, [L, &aClosure, trampoline, &name]() {
-            auto *const pStorage = static_cast<registered_closure *>(
-                lua_newuserdata(L, sizeof(registered_closure)));
+        const auto name = where.str();
 
-            new (pStorage) registered_closure{aClosure, name.str()};
+        _protected_write(L, registry_reference(), aName, [&]() {
+            _push_closure<registered_closure>(L, "jfc.lua.closure", trampoline, aClosure, name);
+        });
+    }
 
-            if (luaL_newmetatable(L, "jfc.lua.closure")) {
-                lua_pushcfunction(L, [](lua_State *pState) {
-                    static_cast<registered_closure *>(lua_touserdata(pState, 1))->~registered_closure();
-                    return 0;
-                });
+    void environment::_register_typed(const path &aName, detail::typed_closure_type aClosure, const bool aYields) {
+        auto *L = state();
 
-                lua_setfield(L, -2, "__gc");
-            }
+        const stack_guard guard(L);
+        const root_scope root(L, registry_reference());
 
-            lua_setmetatable(L, -2);
+        const auto trampoline = aYields ? _yielding_trampoline<_typed_closure_trampoline> : _typed_closure_trampoline;
 
-            lua_pushcclosure(L, trampoline, 1);
+        std::ostringstream where;
+
+        where << aName;
+
+        const auto name = where.str();
+
+        _protected_write(L, registry_reference(), aName, [&]() {
+            _push_closure<registered_typed_closure>(L, "jfc.lua.typed_closure", trampoline, aClosure, name,
+                m_InstructionBudget);
         });
     }
 

@@ -24,7 +24,11 @@ namespace jfc::lua
     class key;
     class path;
     class reference;
+    class function_reference;
+    class table_view;
     class userdata;
+
+    namespace detail { class call_frame; }
 
     /// \brief what a lua table may be indexed by
     using key_type = std::variant<double, bool, std::string>;

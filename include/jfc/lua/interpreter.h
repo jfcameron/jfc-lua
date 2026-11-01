@@ -134,6 +134,13 @@ namespace jfc::lua {
         /// \brief registers a closure (c++ lambda with captured data)
         void register_function(const path &aName, closure_type aClosure);
 
+        /// \brief registers a function that says what it takes in its own signature
+        /// \see environment::register_function
+        template <typename function_type>
+        requires (!std::is_convertible_v<function_type, closure_type>)
+        void register_function(const path &aName, function_type &&aFunction)
+            { m_pGlobals->register_function(aName, std::forward<function_type>(aFunction)); }
+
         using call_timer_type = std::function<void(std::string_view aName, std::chrono::nanoseconds aTook)>;
 
         /// \brief every call a script makes into a registered function, timed

@@ -13,23 +13,32 @@ namespace jfc::lua {
     : m_pState(std::move(aState))
     , m_pReference(new int(aRegistryReference),
         [state = m_pState](const int *const aReference) {
-            void *ud = nullptr;
+            {
+                const unbudgeted_scope unbudgeted(state.get());
 
-            lua_getallocf(state.get(), &ud);
-
-            auto *const limits = static_cast<interpreter_limits *>(ud);
-
-            if (limits) limits->unbudgeted = true;
-
-            luaL_unref(state.get(), LUA_REGISTRYINDEX, *aReference);
-
-            if (limits) limits->unbudgeted = false;
+                luaL_unref(state.get(), LUA_REGISTRYINDEX, *aReference);
+            }
 
             delete aReference;
         })
     {}
 
     reference::~reference() = default;
+
+    function_reference::function_reference(std::shared_ptr<lua_State> aState, const int aRegistryReference,
+        const std::optional<std::size_t> aInstructionBudget)
+    : reference(std::move(aState), aRegistryReference)
+    , m_InstructionBudget(aInstructionBudget)
+    {}
+
+    error_type function_reference::call(const value_list_type &aArguments, value_list_type &aResults)
+        { return _call(aArguments, aResults, m_InstructionBudget); }
+
+    error_type function_reference::call(const value_list_type &aArguments) {
+        value_list_type discarded;
+
+        return call(aArguments, discarded);
+    }
 
     lua_State *reference::state() const { return m_pState.get(); }
 
