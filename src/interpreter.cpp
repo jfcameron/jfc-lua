@@ -45,13 +45,13 @@ namespace {
 
     constexpr int INSTRUCTION_CHECK_INTERVAL = 1000;
 
-    void *_capped_alloc(void *ud, void *p, std::size_t aOldSize, std::size_t aNewSize) {
-        auto *const limits = static_cast<interpreter_limits *>(ud);
-        const std::size_t held = p ? aOldSize : 0;
+    void *_capped_alloc(void *aUserData, void *aBlock, std::size_t aOldSize, std::size_t aNewSize) {
+        auto *const limits = static_cast<interpreter_limits *>(aUserData);
+        const std::size_t held = aBlock ? aOldSize : 0;
 
         if (aNewSize == 0) {
             limits->used -= held;
-            return limits->innerAlloc(limits->innerData, p, aOldSize, 0);
+            return limits->innerAlloc(limits->innerData, aBlock, aOldSize, 0);
         }
 
         const std::size_t prospective = limits->used - held + aNewSize;
@@ -63,7 +63,7 @@ namespace {
                 && prospective - limits->usedAtRunStart > limits->growthCap) return nullptr;
         }
 
-        void *const allocated = limits->innerAlloc(limits->innerData, p, aOldSize, aNewSize);
+        void *const allocated = limits->innerAlloc(limits->innerData, aBlock, aOldSize, aNewSize);
 
         if (allocated) limits->used = prospective;
 
@@ -258,15 +258,15 @@ namespace jfc::lua {
 
         lua_setallocf(state, _capped_alloc, m_pLimits.get());
 
-        m_pState = std::shared_ptr<lua_State>(state, [limits = m_pLimits](lua_State *p) {
-            lua_setallocf(p, limits->innerAlloc, limits->innerData);
-            lua_close(p);
+        m_pState = std::shared_ptr<lua_State>(state, [limits = m_pLimits](lua_State *pState) {
+            lua_setallocf(pState, limits->innerAlloc, limits->innerData);
+            lua_close(pState);
         });
 
         auto *L = m_pState.get();
 
-        lua_atpanic(L, [](lua_State *p) {
-            const char *const message = lua_tostring(p, -1);
+        lua_atpanic(L, [](lua_State *pState) {
+            const char *const message = lua_tostring(pState, -1);
 
             std::fprintf(stderr, "PANIC: unprotected error in call to lua api (%s)\n",
                 message ? message : "no description");

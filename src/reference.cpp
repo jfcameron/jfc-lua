@@ -51,15 +51,15 @@ namespace jfc::lua {
 
     bool reference::is_function() const { return type_name() == "function"; }
 
-    bool reference::operator==(const reference &a) const {
-        if (m_pState != a.m_pState) return false;
+    bool reference::operator==(const reference &aOther) const {
+        if (m_pState != aOther.m_pState) return false;
 
-        if (m_pReference == a.m_pReference) return true;
+        if (m_pReference == aOther.m_pReference) return true;
 
         auto *const L = m_pState.get();
 
         lua_rawgeti(L, LUA_REGISTRYINDEX, *m_pReference);
-        lua_rawgeti(L, LUA_REGISTRYINDEX, *a.m_pReference);
+        lua_rawgeti(L, LUA_REGISTRYINDEX, *aOther.m_pReference);
 
         const bool same = lua_rawequal(L, -1, -2);
 

@@ -60,26 +60,26 @@ bool jfc::lua::detail::to_param(lua_State *const L, const int aIndex,
 
 void jfc::lua::detail::push_param(lua_State *const L,
     const jfc::lua::value_list_type::value_type &aValue) {
-    std::visit([L](auto &&value) {
-        using value_type = std::decay_t<decltype(value)>;
+    std::visit([L](auto &&aHeld) {
+        using value_type = std::decay_t<decltype(aHeld)>;
 
-        if constexpr (std::is_same_v<value_type, double>) lua_pushnumber(L, value);
-        else if constexpr (std::is_same_v<value_type, bool>) lua_pushboolean(L, value);
-        else if constexpr (std::is_same_v<value_type, std::string>) lua_pushlstring(L, value.data(), value.size());
-        else if constexpr (std::is_same_v<value_type, jfc::lua::data_table>) value.push_to_lua_state(L);
+        if constexpr (std::is_same_v<value_type, double>) lua_pushnumber(L, aHeld);
+        else if constexpr (std::is_same_v<value_type, bool>) lua_pushboolean(L, aHeld);
+        else if constexpr (std::is_same_v<value_type, std::string>) lua_pushlstring(L, aHeld.data(), aHeld.size());
+        else if constexpr (std::is_same_v<value_type, jfc::lua::data_table>) aHeld.push_to_lua_state(L);
         else if constexpr (std::is_same_v<value_type, jfc::lua::userdata>)
-            jfc::lua::detail::push_userdata(L, value);
+            jfc::lua::detail::push_userdata(L, aHeld);
         else lua_pushnil(L);
     }, aValue);
 }
 
 static void _push_key(lua_State *const L, const jfc::lua::key &aKey) {
-    std::visit([L](auto &&value) {
-        using value_type = std::decay_t<decltype(value)>;
+    std::visit([L](auto &&aHeld) {
+        using value_type = std::decay_t<decltype(aHeld)>;
 
-        if constexpr (std::is_same_v<value_type, double>) lua_pushnumber(L, value);
-        else if constexpr (std::is_same_v<value_type, bool>) lua_pushboolean(L, value);
-        else lua_pushlstring(L, value.data(), value.size());
+        if constexpr (std::is_same_v<value_type, double>) lua_pushnumber(L, aHeld);
+        else if constexpr (std::is_same_v<value_type, bool>) lua_pushboolean(L, aHeld);
+        else lua_pushlstring(L, aHeld.data(), aHeld.size());
     }, aKey.value());
 }
 
@@ -533,13 +533,13 @@ namespace jfc::lua {
         };
 
         template <bool yields>
-        int _closure_trampoline(lua_State *p) {
+        int _closure_trampoline(lua_State *pState) {
             if constexpr (yields) {
-                const bool mainThread = lua_pushthread(p) == 1;
+                const bool mainThread = lua_pushthread(pState) == 1;
 
-                lua_pop(p, 1);
+                lua_pop(pState, 1);
 
-                if (mainThread) return luaL_error(p, "%s", "this function waits, and only a "
+                if (mainThread) return luaL_error(pState, "%s", "this function waits, and only a "
                     "coroutine can wait: call it from one, not from a plain call or run");
             }
 
@@ -550,11 +550,11 @@ namespace jfc::lua {
             int results = 0;
 
             try {
-                auto *pImpl = static_cast<registered_closure *>(lua_touserdata(p, lua_upvalueindex(1)));
+                auto *pImpl = static_cast<registered_closure *>(lua_touserdata(pState, lua_upvalueindex(1)));
 
                 void *ud = nullptr;
 
-                lua_getallocf(p, &ud);
+                lua_getallocf(pState, &ud);
 
                 const auto *const pLimits = static_cast<const interpreter_limits *>(ud);
                 const bool timed = pLimits && pLimits->callTimer;
@@ -562,11 +562,11 @@ namespace jfc::lua {
 
                 value_list_type args;
 
-                for (int i(1); i <= lua_gettop(p); ++i) {
-                    if (jfc::lua::detail::to_param(p, i, args)) continue;
+                for (int i(1); i <= lua_gettop(pState); ++i) {
+                    if (jfc::lua::detail::to_param(pState, i, args)) continue;
 
                     throw exception("argument " + std::to_string(i) + " is a "
-                        + lua_typename(p, lua_type(p, i)) + ", which cannot cross into c++");
+                        + lua_typename(pState, lua_type(pState, i)) + ", which cannot cross into c++");
                 }
 
                 auto return_values = [&] {
@@ -575,12 +575,12 @@ namespace jfc::lua {
                     catch (...) { throw exception("a registered function threw something that is not a std::exception"); }
                 }();
 
-                lua_settop(p, 0);
+                lua_settop(pState, 0);
 
-                if (!lua_checkstack(p, static_cast<int>(return_values.size())))
+                if (!lua_checkstack(pState, static_cast<int>(return_values.size())))
                     throw exception("the lua stack cannot grow enough to return this many values");
 
-                for (const auto &val : return_values) jfc::lua::detail::push_param(p, val);
+                for (const auto &val : return_values) jfc::lua::detail::push_param(pState, val);
 
                 results = static_cast<int>(return_values.size());
 
@@ -592,9 +592,9 @@ namespace jfc::lua {
                 failed = true;
             }
 
-            if (failed) return luaL_error(p, "%s", failure);
+            if (failed) return luaL_error(pState, "%s", failure);
 
-            if constexpr (yields) return lua_yield(p, results);
+            if constexpr (yields) return lua_yield(pState, results);
             else return results;
         }
     }
@@ -624,8 +624,8 @@ namespace jfc::lua {
             new (pStorage) registered_closure{aClosure, name.str()};
 
             if (luaL_newmetatable(L, "jfc.lua.closure")) {
-                lua_pushcfunction(L, [](lua_State *p) {
-                    static_cast<registered_closure *>(lua_touserdata(p, 1))->~registered_closure();
+                lua_pushcfunction(L, [](lua_State *pState) {
+                    static_cast<registered_closure *>(lua_touserdata(pState, 1))->~registered_closure();
                     return 0;
                 });
 

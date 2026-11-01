@@ -62,10 +62,10 @@ namespace jfc::lua
         [[nodiscard]] error_type call(const path &aPath, const value_list_type &aArguments = {});
 
         /// \brief registers a closure (c++ lambda with captured data) into this environment alone
-        void register_function(const path &aName, closure_type a);
+        void register_function(const path &aName, closure_type aClosure);
 
         /// \brief registers a closure that suspends the coroutine calling it
-        void register_yielding_function(const path &aName, closure_type a);
+        void register_yielding_function(const path &aName, closure_type aClosure);
 
         /// \brief the function at aFunction, ready to run as a coroutine against this environment
         [[nodiscard]] std::optional<coroutine> make_coroutine(const path &aFunction);

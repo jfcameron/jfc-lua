@@ -2,12 +2,14 @@
 
 #include <jfc/lua/exception.h>
 
-using namespace jfc::lua;
+namespace jfc::lua {
+    exception::exception()
+    : exception("jfc::lua::exception")
+    {}
 
-const char *exception::what() const noexcept {
-    return mWhat.c_str();
+    exception::exception(const std::string &aWhat)
+    : mpWhat(std::make_shared<const std::string>(aWhat))
+    {}
+
+    const char *exception::what() const noexcept { return mpWhat->c_str(); }
 }
-
-exception::exception(std::string aWhat)
-: mWhat(std::move(aWhat))
-{}

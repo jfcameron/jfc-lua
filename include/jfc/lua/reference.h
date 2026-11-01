@@ -46,7 +46,7 @@ namespace jfc::lua
         /// \brief call the referenced value, discarding whatever it returns
         [[nodiscard]] error_type call(const value_list_type &aArguments = {});
 
-        [[nodiscard]] bool operator==(const reference &a) const;
+        [[nodiscard]] bool operator==(const reference &aOther) const;
 
         /// \brief writes a [string, boolean] through this handle
         void write(const path &aPath, const bool aValue);

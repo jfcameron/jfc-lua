@@ -12,9 +12,9 @@
       "binaryDir": "${sourceDir}/out/build/${presetName}",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "JFC_BUILD_TESTS": "ON",
-        "JFC_BUILD_DEMO": "OFF",
-        "JFC_BUILD_DOCS": "OFF"
+        "JFCLUA_BUILD_TESTS": "ON",
+        "JFCLUA_BUILD_DEMO": "OFF",
+        "JFCLUA_BUILD_DOCS": "OFF"
       }
     },
     {
@@ -68,8 +68,8 @@
       "displayName": "Linux / gcc / demo",
       "inherits": "linux-gcc",
       "cacheVariables": {
-        "JFC_BUILD_DEMO": "ON",
-        "JFC_BUILD_TESTS": "OFF"
+        "JFCLUA_BUILD_DEMO": "ON",
+        "JFCLUA_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -103,9 +103,9 @@
       "displayName": "Linux / documentation",
       "inherits": "linux-gcc",
       "cacheVariables": {
-        "JFC_BUILD_DOCS": "ON",
-        "JFC_BUILD_TESTS": "OFF",
-        "JFC_BUILD_DEMO": "OFF"
+        "JFCLUA_BUILD_DOCS": "ON",
+        "JFCLUA_BUILD_TESTS": "OFF",
+        "JFCLUA_BUILD_DEMO": "OFF"
       }
     },
     {
@@ -184,6 +184,50 @@
         "CMAKE_CXX_FLAGS": "-fwasm-exceptions -Wall -Wextra",
         "CMAKE_EXE_LINKER_FLAGS": "-fwasm-exceptions -sALLOW_MEMORY_GROWTH",
         "CMAKE_CROSSCOMPILING_EMULATOR": "node"
+      }
+    },
+    {
+      "name": "linux-gcc-ci",
+      "displayName": "Linux / gcc / CI",
+      "description": "Warnings are errors. CI only: a consumer's build should not fail on a warning we introduced, and ours should not survive one.",
+      "inherits": "linux-gcc",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "-Wall -Wextra -Werror"
+      }
+    },
+    {
+      "name": "linux-clang-ci",
+      "displayName": "Linux / clang / CI",
+      "description": "Warnings are errors. CI only: a consumer's build should not fail on a warning we introduced, and ours should not survive one.",
+      "inherits": "linux-clang",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "-Wall -Wextra -Werror"
+      }
+    },
+    {
+      "name": "linux-clang-asan",
+      "displayName": "Linux / clang / asan + ubsan / puc lua 5.1",
+      "description": "The reference implementation, whose C the sanitizers can see. LuaJIT is machine code to them.",
+      "inherits": "linux-clang",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "JFC_LUA_BACKEND": "lua51",
+        "CMAKE_CXX_FLAGS": "-Wall -Wextra -fsanitize=address,undefined -fno-omit-frame-pointer",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address,undefined"
       }
     }
   ],
@@ -300,6 +344,45 @@
     {
       "name": "android-x86",
       "configurePreset": "android-x86"
+    },
+    {
+      "name": "linux-gcc-ci",
+      "configurePreset": "linux-gcc-ci",
+      "targets": [
+        "jfclua",
+        "jfclua_test_0"
+      ],
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-clang-ci",
+      "configurePreset": "linux-clang-ci",
+      "targets": [
+        "jfclua",
+        "jfclua_test_0"
+      ],
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-clang-asan",
+      "configurePreset": "linux-clang-asan",
+      "targets": [
+        "jfclua",
+        "jfclua_test_0"
+      ],
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
     }
   ],
   "testPresets": [
@@ -399,6 +482,57 @@
       },
       "output": {
         "outputOnFailure": true
+      }
+    },
+    {
+      "name": "linux-gcc-ci",
+      "configurePreset": "linux-gcc-ci",
+      "filter": {
+        "include": {
+          "name": "jfclua_test_0"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-clang-ci",
+      "configurePreset": "linux-clang-ci",
+      "filter": {
+        "include": {
+          "name": "jfclua_test_0"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-clang-asan",
+      "configurePreset": "linux-clang-asan",
+      "filter": {
+        "include": {
+          "name": "jfclua_test_0"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
       }
     }
   ]

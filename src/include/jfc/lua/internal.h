@@ -111,13 +111,13 @@ namespace jfc::lua::detail {
             std::exception_ptr thrown;
         } held{&aWork, {}};
 
-        const int status = lua_cpcall(L, [](lua_State *const p) -> int {
-            auto *const pHeld = static_cast<context *>(lua_touserdata(p, 1));
+        const int status = lua_cpcall(L, [](lua_State *const pState) -> int {
+            auto *const pHeld = static_cast<context *>(lua_touserdata(pState, 1));
 
-            lua_pop(p, 1);
+            lua_pop(pState, 1);
 
             // a c++ exception unwinding through PUC Lua's C frames would leave the state in pieces
-            try { (*pHeld->pWork)(p); }
+            try { (*pHeld->pWork)(pState); }
             catch (const std::exception &) { pHeld->thrown = std::current_exception(); }
 
             return 0;

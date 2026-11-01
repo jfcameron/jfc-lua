@@ -62,8 +62,8 @@ namespace jfc::lua
         [[nodiscard]] const void *address() const { return m_Object.get(); }
 
         /// \brief whether both refer to the same object
-        [[nodiscard]] bool operator==(const userdata &a) const
-            { return m_Object == a.m_Object && m_TypeKey == a.m_TypeKey; }
+        [[nodiscard]] bool operator==(const userdata &aOther) const
+            { return m_Object == aOther.m_Object && m_TypeKey == aOther.m_TypeKey; }
 
 
     private:

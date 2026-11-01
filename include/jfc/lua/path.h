@@ -42,10 +42,10 @@ namespace jfc::lua
 
         [[nodiscard]] const std::vector<key> &segments() const;
 
-        [[nodiscard]] bool operator==(const path &a) const;
+        [[nodiscard]] bool operator==(const path &aOther) const;
 
         /// \brief write the string form
-        friend std::ostream &operator<<(std::ostream &stream, const path &a);
+        friend std::ostream &operator<<(std::ostream &aStream, const path &aValue);
 
     private:
         std::vector<key> m_Segments;
