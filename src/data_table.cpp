@@ -202,20 +202,20 @@ namespace jfc::lua {
             "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while"
         };
 
-        [[nodiscard]] constexpr bool _is_digit(const char c) { return c >= '0' && c <= '9'; }
+        [[nodiscard]] constexpr bool _is_digit(const char aCharacter) { return aCharacter >= '0' && aCharacter <= '9'; }
 
-        [[nodiscard]] constexpr bool _is_hex_digit(const char c) {
-            return _is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        [[nodiscard]] constexpr bool _is_hex_digit(const char aCharacter) {
+            return _is_digit(aCharacter) || (aCharacter >= 'a' && aCharacter <= 'f') || (aCharacter >= 'A' && aCharacter <= 'F');
         }
 
-        [[nodiscard]] constexpr bool _is_name_start(const char c) {
-            return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
+        [[nodiscard]] constexpr bool _is_name_start(const char aCharacter) {
+            return (aCharacter >= 'a' && aCharacter <= 'z') || (aCharacter >= 'A' && aCharacter <= 'Z') || aCharacter == '_';
         }
 
-        [[nodiscard]] constexpr bool _is_name_char(const char c) { return _is_name_start(c) || _is_digit(c); }
+        [[nodiscard]] constexpr bool _is_name_char(const char aCharacter) { return _is_name_start(aCharacter) || _is_digit(aCharacter); }
 
-        [[nodiscard]] constexpr bool _is_space(const char c) {
-            return c == ' ' || c == '\t' || c == '\n' || c == '\v' || c == '\f' || c == '\r';
+        [[nodiscard]] constexpr bool _is_space(const char aCharacter) {
+            return aCharacter == ' ' || aCharacter == '\t' || aCharacter == '\n' || aCharacter == '\v' || aCharacter == '\f' || aCharacter == '\r';
         }
 
         [[nodiscard]] bool _is_bare_key(const std::string &aName) {
@@ -633,26 +633,26 @@ namespace jfc::lua {
         };
     }
 
-    std::ostream &operator<<(std::ostream &out, const data_table &a) {
+    std::ostream &operator<<(std::ostream &aOut, const data_table &aValue) {
         std::stringstream stream;
 
         stream << "{";
 
-        const auto fields = a.keys();
+        const auto fields = aValue.keys();
 
         std::size_t remaining = fields.size();
 
         const auto write = [&stream](const data_table::value_type &aValue) {
-            std::visit([&stream](auto &&value) {
-                using value_type = std::decay_t<decltype(value)>;
+            std::visit([&stream](auto &&aHeld) {
+                using value_type = std::decay_t<decltype(aHeld)>;
 
-                if constexpr (std::is_same_v<value_type, double>) _write_number(stream, value);
-                else if constexpr (std::is_same_v<value_type, bool>) stream << (value ? "true" : "false");
-                else if constexpr (std::is_same_v<value_type, std::string>) _write_quoted(stream, value);
+                if constexpr (std::is_same_v<value_type, double>) _write_number(stream, aHeld);
+                else if constexpr (std::is_same_v<value_type, bool>) stream << (aHeld ? "true" : "false");
+                else if constexpr (std::is_same_v<value_type, std::string>) _write_quoted(stream, aHeld);
                 else if constexpr (std::is_same_v<value_type, std::shared_ptr<data_table>>) {
-                    if (!value) throw exception("table operator<<: null subtable");
+                    if (!aHeld) throw exception("table operator<<: null subtable");
 
-                    stream << *value;
+                    stream << *aHeld;
                 }
                 else throw exception("table operator<<: unsupported type");
             }, aValue);
@@ -683,15 +683,15 @@ namespace jfc::lua {
                 }
             }
 
-            write(*a._find(field));
+            write(*aValue._find(field));
             separate();
         }
 
         stream << "}";
 
-        out << stream.str();
+        aOut << stream.str();
 
-        return out;
+        return aOut;
     }
 
     std::string data_table::to_string() const {
@@ -720,17 +720,17 @@ namespace jfc::lua {
         lua_newtable(L);
 
         const auto push_value = [L](const value_type &aValue) {
-            std::visit([L](auto &&value) {
-                using held_type = std::decay_t<decltype(value)>;
+            std::visit([L](auto &&aHeld) {
+                using held_type = std::decay_t<decltype(aHeld)>;
 
-                if constexpr (std::is_same_v<held_type, double>) lua_pushnumber(L, value);
-                else if constexpr (std::is_same_v<held_type, bool>) lua_pushboolean(L, value);
-                else if constexpr (std::is_same_v<held_type, std::string>) lua_pushlstring(L, value.data(), value.size());
+                if constexpr (std::is_same_v<held_type, double>) lua_pushnumber(L, aHeld);
+                else if constexpr (std::is_same_v<held_type, bool>) lua_pushboolean(L, aHeld);
+                else if constexpr (std::is_same_v<held_type, std::string>) lua_pushlstring(L, aHeld.data(), aHeld.size());
                 else if constexpr (std::is_same_v<held_type, std::shared_ptr<data_table>>)
                 {
-                    if (!value) throw exception("data_table::push_to_lua_state: null subtable");
+                    if (!aHeld) throw exception("data_table::push_to_lua_state: null subtable");
 
-                    value->push_to_lua_state(L);
+                    aHeld->push_to_lua_state(L);
                 }
                 else throw exception("data_table::push_to_lua_state: unsupported value type");
             }, aValue);

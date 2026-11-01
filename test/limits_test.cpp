@@ -4,6 +4,7 @@
 
 #include <jfc/lua.h>
 
+#include <stdexcept>
 #include <string>
 
 using namespace jfc::lua;

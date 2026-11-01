@@ -8,9 +8,9 @@ project(jfclua
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/jfc-cmake/jfclib.cmake")
 
-option(JFC_BUILD_DEMO "Build the demo" OFF)
-option(JFC_BUILD_DOCS "Build documentation" OFF)
-option(JFC_BUILD_TESTS "Build unit tests" ${PROJECT_IS_TOP_LEVEL})
+option(JFCLUA_BUILD_DEMO "Build the demo" OFF)
+option(JFCLUA_BUILD_DOCS "Build documentation" OFF)
+option(JFCLUA_BUILD_TESTS "Build unit tests" ${PROJECT_IS_TOP_LEVEL})
 
 set(_jfc_lua_apple_device OFF)
 
@@ -51,19 +51,7 @@ if (JFC_LUA_BACKEND STREQUAL "luajit")
     add_definitions(-DJFC_LUA_LUAJIT)
 endif()
 
-set(_jfc_outer_build_tests "${JFC_BUILD_TESTS}")
-set(_jfc_outer_build_docs "${JFC_BUILD_DOCS}")
-set(_jfc_outer_build_demo "${JFC_BUILD_DEMO}")
-
-set(JFC_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-set(JFC_BUILD_DOCS OFF CACHE BOOL "" FORCE)
-set(JFC_BUILD_DEMO OFF CACHE BOOL "" FORCE)
-
 add_subdirectory(extern)
-
-set(JFC_BUILD_TESTS "${_jfc_outer_build_tests}" CACHE BOOL "" FORCE)
-set(JFC_BUILD_DOCS "${_jfc_outer_build_docs}" CACHE BOOL "" FORCE)
-set(JFC_BUILD_DEMO "${_jfc_outer_build_demo}" CACHE BOOL "" FORCE)
 
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -127,15 +115,15 @@ if (NOT TARGET jfclua)
 
 endif()
 
-if (JFC_BUILD_DEMO)
+if (JFCLUA_BUILD_DEMO)
     add_subdirectory(demo)
 endif()
 
-if (JFC_BUILD_TESTS)
+if (JFCLUA_BUILD_TESTS)
     add_subdirectory(test)
 endif()
 
-if (JFC_BUILD_DOCS)
+if (JFCLUA_BUILD_DOCS)
     jfc_generate_documentation_doxygen(
         README_PATH      README.md
         OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/docs

@@ -33,7 +33,7 @@ namespace jfc::lua
     {
     public:
         /// \brief serialize to a string containing a lua table definition
-        friend std::ostream &operator<<(std::ostream &stream, const data_table &a);
+        friend std::ostream &operator<<(std::ostream &aStream, const data_table &aValue);
 
         /// \brief construct a table from an existing table within a lua state
         ///

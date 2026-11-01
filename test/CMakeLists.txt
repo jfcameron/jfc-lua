@@ -10,6 +10,7 @@ jfc_add_tests(
         "${CMAKE_CURRENT_LIST_DIR}/coroutine_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/closure_boundary_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/data_table_access_test.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/exception_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/data_table_dense_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/data_table_storable_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/data_table_test.cpp"

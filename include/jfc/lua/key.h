@@ -22,17 +22,14 @@ namespace jfc::lua
         : m_Value(static_cast<double>(aNumber))
         {}
 
-        /// \brief a boolean key
         key(const bool aBoolean)
         : m_Value(aBoolean)
         {}
 
-        /// \brief a string key
         key(std::string aName)
         : m_Value(std::move(aName))
         {}
 
-        /// \brief a string key
         key(const char *const aName)
         : m_Value(std::string(aName))
         {}
@@ -44,7 +41,7 @@ namespace jfc::lua
         /// \brief the key as stored, for visiting
         [[nodiscard]] const key_type &value() const { return m_Value; }
 
-        [[nodiscard]] bool operator==(const key &a) const { return m_Value == a.m_Value; }
+        [[nodiscard]] bool operator==(const key &aOther) const { return m_Value == aOther.m_Value; }
 
     private:
         key_type m_Value;

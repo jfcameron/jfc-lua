@@ -143,15 +143,15 @@ namespace jfc::lua {
 
     const std::vector<key> &path::segments() const { return m_Segments; }
 
-    bool path::operator==(const path &a) const { return m_Segments == a.m_Segments; }
+    bool path::operator==(const path &aOther) const { return m_Segments == aOther.m_Segments; }
 
 
-    std::ostream &operator<<(std::ostream &out, const path &a)
+    std::ostream &operator<<(std::ostream &aOut, const path &aValue)
     {
         std::stringstream stream;
 
-        for (std::size_t i = 0; i < a.m_Segments.size(); ++i) {
-            const auto &segment = a.m_Segments[i];
+        for (std::size_t i = 0; i < aValue.m_Segments.size(); ++i) {
+            const auto &segment = aValue.m_Segments[i];
 
             if (segment.is_string()) {
                 const auto &name = std::get<std::string>(segment.value());
@@ -186,8 +186,8 @@ namespace jfc::lua {
             }
         }
 
-        out << stream.str();
+        aOut << stream.str();
 
-        return out;
+        return aOut;
     }
 }

@@ -132,7 +132,7 @@ namespace jfc::lua {
         [[nodiscard]] error_type call(const path &aPath, const value_list_type &aArguments = {});
 
         /// \brief registers a closure (c++ lambda with captured data)
-        void register_function(const path &aName, closure_type a);
+        void register_function(const path &aName, closure_type aClosure);
 
         using call_timer_type = std::function<void(std::string_view aName, std::chrono::nanoseconds aTook)>;
 

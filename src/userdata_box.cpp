@@ -138,15 +138,15 @@ namespace {
         return 1;
     }
 
-    int _method_trampoline(lua_State *p) {
-        const auto *const self = jfc::lua::detail::to_userdata(p, 1);
+    int _method_trampoline(lua_State *pState) {
+        const auto *const self = jfc::lua::detail::to_userdata(pState, 1);
 
-        const void *const typeKey = lua_touserdata(p, lua_upvalueindex(2));
+        const void *const typeKey = lua_touserdata(pState, lua_upvalueindex(2));
 
         if (!self || self->empty() || self->type_key() != typeKey)
-            return luaL_error(p, "%s is a method of %s: call it on one, with a colon -- "
-                "object:%s(...)", lua_tostring(p, lua_upvalueindex(4)),
-                lua_tostring(p, lua_upvalueindex(3)), lua_tostring(p, lua_upvalueindex(4)));
+            return luaL_error(pState, "%s is a method of %s: call it on one, with a colon -- "
+                "object:%s(...)", lua_tostring(pState, lua_upvalueindex(4)),
+                lua_tostring(pState, lua_upvalueindex(3)), lua_tostring(pState, lua_upvalueindex(4)));
 
         char failure[256] = {};
 
@@ -156,11 +156,11 @@ namespace {
 
         try {
             auto *pMethod = static_cast<jfc::lua::interpreter::untyped_method_type *>(
-                lua_touserdata(p, lua_upvalueindex(1)));
+                lua_touserdata(pState, lua_upvalueindex(1)));
 
             void *ud = nullptr;
 
-            lua_getallocf(p, &ud);
+            lua_getallocf(pState, &ud);
 
             const auto *const pLimits = static_cast<const jfc::lua::interpreter_limits *>(ud);
             const bool timed = pLimits && pLimits->callTimer;
@@ -170,11 +170,11 @@ namespace {
 
             jfc::lua::value_list_type args;
 
-            for (int i = 2; i <= lua_gettop(p); ++i) {
-                if (jfc::lua::detail::to_param(p, i, args)) continue;
+            for (int i = 2; i <= lua_gettop(pState); ++i) {
+                if (jfc::lua::detail::to_param(pState, i, args)) continue;
 
                 throw jfc::lua::exception("argument " + std::to_string(i - 1) + " is a "
-                    + lua_typename(p, lua_type(p, i)) + ", which cannot cross into c++");
+                    + lua_typename(pState, lua_type(pState, i)) + ", which cannot cross into c++");
             }
 
             auto returned = [&] {
@@ -183,20 +183,20 @@ namespace {
                 catch (...) { throw jfc::lua::exception("a method threw something that is not a std::exception"); }
             }();
 
-            lua_settop(p, 0);
+            lua_settop(pState, 0);
 
-            if (!lua_checkstack(p, static_cast<int>(returned.size())))
+            if (!lua_checkstack(pState, static_cast<int>(returned.size())))
                 throw jfc::lua::exception("the lua stack cannot grow enough to return this many "
                     "values");
 
-            for (const auto &value : returned) jfc::lua::detail::push_param(p, value);
+            for (const auto &value : returned) jfc::lua::detail::push_param(pState, value);
 
             results = static_cast<int>(returned.size());
 
             if (timed) {
                 std::size_t length = 0;
 
-                const char *const name = lua_tolstring(p, lua_upvalueindex(5), &length);
+                const char *const name = lua_tolstring(pState, lua_upvalueindex(5), &length);
 
                 pLimits->callTimer(std::string_view(name, length), std::chrono::steady_clock::now() - began);
             }
@@ -207,15 +207,15 @@ namespace {
             failed = true;
         }
 
-        if (failed) return luaL_error(p, "%s", failure);
+        if (failed) return luaL_error(pState, "%s", failure);
 
         return results;
     }
 
-    int _destroy_method(lua_State *p) {
+    int _destroy_method(lua_State *pState) {
         using method_type = jfc::lua::interpreter::untyped_method_type;
 
-        static_cast<method_type *>(lua_touserdata(p, 1))->~method_type();
+        static_cast<method_type *>(lua_touserdata(pState, 1))->~method_type();
 
         return 0;
     }

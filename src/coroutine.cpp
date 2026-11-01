@@ -66,12 +66,12 @@ namespace jfc::lua {
         try {
             bool pushed = false;
 
-            if (const auto error = detail::protect(L, [&](lua_State *const p) {
-                if (!lua_checkstack(p, argumentCount)) return;
+            if (const auto error = detail::protect(L, [&](lua_State *const pState) {
+                if (!lua_checkstack(pState, argumentCount)) return;
 
-                for (const auto &argument : aArguments) detail::push_param(p, argument);
+                for (const auto &argument : aArguments) detail::push_param(pState, argument);
 
-                lua_xmove(p, thread, argumentCount);
+                lua_xmove(pState, thread, argumentCount);
 
                 pushed = true;
             })) return "could not resume the coroutine: " + *error;
@@ -91,10 +91,10 @@ namespace jfc::lua {
 
             error_type error = "lua reported an error it could not describe";
 
-            if (const auto unread = detail::protect(L, [&](lua_State *const p) {
-                lua_xmove(thread, p, 1);
+            if (const auto unread = detail::protect(L, [&](lua_State *const pState) {
+                lua_xmove(thread, pState, 1);
 
-                if (const auto *const message = lua_tostring(p, -1)) error = message;
+                if (const auto *const message = lua_tostring(pState, -1)) error = message;
             })) error = unread;
 
             lua_settop(thread, 0);
@@ -106,25 +106,25 @@ namespace jfc::lua {
 
         error_type error;
 
-        if (const auto unread = detail::protect(L, [&](lua_State *const p) {
-            if (!lua_checkstack(p, resultCount)) {
+        if (const auto unread = detail::protect(L, [&](lua_State *const pState) {
+            if (!lua_checkstack(pState, resultCount)) {
                 error = "the coroutine gave more values than the lua stack can hold";
 
                 return;
             }
 
-            lua_xmove(thread, p, resultCount);
+            lua_xmove(thread, pState, resultCount);
 
-            const int base = lua_gettop(p) - resultCount;
+            const int base = lua_gettop(pState) - resultCount;
 
             for (int i = 1; i <= resultCount; ++i) {
                 const auto unconverted = [&](const std::string &aWhy) {
                     error = std::string(result == LUA_YIELD ? "the coroutine yielded" : "the coroutine returned")
-                        + " a " + lua_typename(p, lua_type(p, base + i)) + " in position " + std::to_string(i) + aWhy;
+                        + " a " + lua_typename(pState, lua_type(pState, base + i)) + " in position " + std::to_string(i) + aWhy;
                 };
 
                 try {
-                    if (!detail::to_param(p, base + i, aResults)) return unconverted(", which cannot cross into c++");
+                    if (!detail::to_param(pState, base + i, aResults)) return unconverted(", which cannot cross into c++");
                 }
                 catch (const exception &e) { return unconverted(" that cannot cross into c++: " + std::string(e.what())); }
             }

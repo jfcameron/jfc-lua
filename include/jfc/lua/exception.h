@@ -6,6 +6,7 @@
 #include <jfc/lua/types.h>
 
 #include <exception>
+#include <memory>
 #include <string>
 
 namespace jfc::lua {
@@ -13,17 +14,18 @@ namespace jfc::lua {
     ///
     /// One type, so a caller can catch everything this library throws without naming each case.
     class exception : public std::exception {
+        std::shared_ptr<const std::string> mpWhat;
+
     public:
-        exception() = default;
+        exception();
 
-        exception(std::string aWhat);
+        exception(const std::string &aWhat);
 
-        virtual ~exception() override = default;
+        exception(const exception &aOther) noexcept = default;
 
-        virtual const char *what() const noexcept override;
+        exception &operator=(const exception &aOther) noexcept = default;
 
-    private:
-        std::string mWhat = "jfc::lua::exception";
+        const char *what() const noexcept override;
     };
 }
 
