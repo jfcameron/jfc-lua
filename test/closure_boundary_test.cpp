@@ -87,6 +87,23 @@ TEST_CASE("what the caller's own closure throws comes back as a lua error", "[cl
     }
 }
 
+TEST_CASE("the argument list is made to fit", "[closure]") {
+    interpreter interp;
+
+    auto env = interp.make_environment();
+
+    std::size_t capacity = 0;
+
+    env->register_function("takes", [&](value_list_type aArguments) -> value_list_type {
+        capacity = aArguments.capacity();
+
+        return {};
+    });
+
+    REQUIRE_FALSE(env->run("takes(1, 2, 3, 4, 5)"));
+    REQUIRE(capacity == 5);
+}
+
 TEST_CASE("the interpreter survives, and keeps working", "[closure]") {
     interpreter interp;
 

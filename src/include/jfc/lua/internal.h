@@ -3,6 +3,8 @@
 #ifndef JFC_LUA_INTERNAL_H
 #define JFC_LUA_INTERNAL_H
 
+#include <jfc/lua/exception.h>
+#include <jfc/lua/key.h>
 #include <jfc/lua/reference.h>
 #include <jfc/lua/userdata.h>
 #include <jfc/lua/types.h>
@@ -15,9 +17,11 @@
 
 #include <chrono>
 #include <cstddef>
+#include <cstdio>
 #include <exception>
 #include <functional>
 #include <iosfwd>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -70,6 +74,9 @@ namespace jfc::lua {
 
         //! told of every call a script makes into a registered function
         std::function<void(std::string_view, std::chrono::nanoseconds)> callTimer;
+
+        //! the state these limits govern, for what is handed out from inside a call
+        std::weak_ptr<lua_State> state;
     };
 }
 
@@ -77,12 +84,18 @@ namespace jfc::lua::detail {
     /// \brief the value at aIndex, appended to aOut; false for a value that cannot cross into c++
     bool to_param(lua_State *L, int aIndex, value_list_type &aOut);
 
+    //! push a key
+    void push_key(lua_State *L, const key &aKey);
+
     //! push a value that crossed from c++
     void push_param(lua_State *L, const value_list_type::value_type &aValue);
 
     /// \brief push the lua value an object is: the one it already is, if anything still holds that
     /// one, or a new one. \see interpreter::register_type
     void push_userdata(lua_State *L, const userdata &aValue);
+
+    /// \brief the name a type was registered under, if it was
+    [[nodiscard]] std::optional<std::string> type_name(lua_State *L, const void *aTypeKey);
 
     /// \brief the object a value at aIndex boxes, or null if it is not a box this library made
     [[nodiscard]] const userdata *to_userdata(lua_State *L, int aIndex);
@@ -135,6 +148,77 @@ namespace jfc::lua::detail {
 
         return error;
     }
+
+    /// \brief a script's call into c++: aWork runs, and the call timer hears of it under aName. Returns what aWork does,
+    /// how many results it pushed.
+    ///
+    /// A failure is raised as a lua error once this call's own objects are gone, since PUC Lua raises with longjmp. The
+    /// caller and aWork's captures hold nothing with a destructor for the same reason.
+    template <typename work_type>
+    [[nodiscard]] int guarded_call(lua_State *const L, const std::string_view aName, work_type &&aWork) {
+        char failure[256] = {};
+
+        bool failed = false;
+
+        int results = 0;
+
+        try {
+            void *ud = nullptr;
+
+            lua_getallocf(L, &ud);
+
+            const auto *const pLimits = static_cast<const interpreter_limits *>(ud);
+            const bool timed = pLimits && pLimits->callTimer;
+            const auto began = timed ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
+
+            results = aWork();
+
+            if (timed) pLimits->callTimer(aName, std::chrono::steady_clock::now() - began);
+        }
+        catch (const std::exception &e) {
+            std::snprintf(failure, sizeof failure, "%s", e.what());
+
+            failed = true;
+        }
+
+        if (failed) return luaL_error(L, "%s", failure);
+
+        return results;
+    }
+
+    /// \brief guarded_call for a value list: the arguments from aFirstArgument up go to aCall, and what it returns goes
+    /// back on the stack. aWho names the caller in the error for something that is not a std::exception.
+    template <typename call_type>
+    [[nodiscard]] int bound_call(lua_State *const L, const int aFirstArgument, const std::string_view aName,
+        const char *const aWho, call_type &&aCall) {
+        return guarded_call(L, aName, [&] {
+            value_list_type arguments;
+
+            arguments.reserve(static_cast<std::size_t>(lua_gettop(L) - aFirstArgument + 1));
+
+            for (int i = aFirstArgument; i <= lua_gettop(L); ++i) {
+                if (to_param(L, i, arguments)) continue;
+
+                throw exception("argument " + std::to_string(i - aFirstArgument + 1) + " is a "
+                    + lua_typename(L, lua_type(L, i)) + ", which cannot cross into c++");
+            }
+
+            auto returned = [&] {
+                try { return aCall(std::move(arguments)); }
+                catch (const std::exception &) { throw; }
+                catch (...) { throw exception(std::string(aWho) + " threw something that is not a std::exception"); }
+            }();
+
+            lua_settop(L, 0);
+
+            if (!lua_checkstack(L, static_cast<int>(returned.size())))
+                throw exception("the lua stack cannot grow enough to return this many values");
+
+            for (const auto &value : returned) push_param(L, value);
+
+            return static_cast<int>(returned.size());
+        });
+    }
 }
 
 namespace {
@@ -180,6 +264,30 @@ namespace {
         }
     };
 
+
+    /// \brief allocations here ignore the caps: for those nothing could catch a refusal of
+    class unbudgeted_scope final {
+        jfc::lua::interpreter_limits *m_pLimits;
+        bool m_Outer;
+
+    public:
+        unbudgeted_scope(const unbudgeted_scope &) = delete;
+        unbudgeted_scope &operator=(const unbudgeted_scope &) = delete;
+
+        unbudgeted_scope(lua_State *const aState)
+        : m_pLimits(nullptr)
+        , m_Outer(false) {
+            void *ud = nullptr;
+
+            lua_getallocf(aState, &ud);
+
+            m_pLimits = static_cast<jfc::lua::interpreter_limits *>(ud);
+
+            if (m_pLimits) m_Outer = std::exchange(m_pLimits->unbudgeted, true);
+        }
+
+        ~unbudgeted_scope() { if (m_pLimits) m_pLimits->unbudgeted = m_Outer; }
+    };
 
     /// \brief one outermost run's share of the instruction and memory budgets
     class budget_scope final {

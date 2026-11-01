@@ -261,7 +261,12 @@ namespace jfc::lua {
         m_pState = std::shared_ptr<lua_State>(state, [limits = m_pLimits](lua_State *pState) {
             lua_setallocf(pState, limits->innerAlloc, limits->innerData);
             lua_close(pState);
+
+            // it points at the control block holding this deleter, which holds limits: a cycle unless broken
+            limits->state.reset();
         });
+
+        m_pLimits->state = m_pState;
 
         auto *L = m_pState.get();
 

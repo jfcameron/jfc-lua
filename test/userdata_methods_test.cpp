@@ -166,6 +166,54 @@ TEST_CASE("**a method that throws raises an error in lua, and the script carries
     REQUIRE(env->read_string("after") == "");
 }
 
+TEST_CASE("**a method's arguments are counted from the first after the object**", "[userdata][methods]") {
+    interpreter lua;
+
+    std::size_t capacity = 0;
+
+    lua.register_type<plain>("plain", {
+        {"takes", [&](plain &, value_list_type aArguments) -> value_list_type {
+            capacity = aArguments.capacity();
+
+            return {};
+        }},
+    });
+
+    auto env = lua.make_environment();
+
+    env->write("object", std::make_shared<plain>());
+
+    SECTION("**the list is made to fit them**") {
+        REQUIRE_FALSE(env->run("object:takes(1, 2, 3, 4, 5)"));
+        REQUIRE(capacity == 5);
+    }
+
+    SECTION("**and one that cannot cross is numbered among them**") {
+        const auto error = env->run("object:takes(1, print)");
+
+        REQUIRE(error);
+        REQUIRE(error->find("argument 2") != std::string::npos);
+    }
+}
+
+TEST_CASE("**a method that throws something that is not a std::exception says it was a method**",
+    "[userdata][methods]") {
+    interpreter lua;
+
+    lua.register_type<plain>("plain", {
+        {"throws", [](plain &, value_list_type) -> value_list_type { throw 1; }},
+    });
+
+    auto env = lua.make_environment();
+
+    env->write("object", std::make_shared<plain>());
+
+    const auto error = env->run("object:throws()");
+
+    REQUIRE(error);
+    REQUIRE(error->find("a method threw something that is not a std::exception") != std::string::npos);
+}
+
 TEST_CASE("**a script can set fields on a registered object, as on a table**",
     "[userdata][fields]") {
     interpreter lua;

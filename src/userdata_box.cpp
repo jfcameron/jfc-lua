@@ -6,9 +6,8 @@
 #include <jfc/lua/interpreter.h>
 #include <jfc/lua/userdata.h>
 
-#include <chrono>
-#include <cstdio>
 #include <new>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -21,6 +20,7 @@ namespace {
     const char TYPES = 0;   //!< registry: type key -> that type's metatable
     const char BOXES = 0;   //!< registry: type key -> weak table of address -> box
     const char METHODS = 0; //!< in a registered type's metatable: its methods table
+    const char NAME = 0;    //!< in a registered type's metatable: the name it was registered under
 
     const std::string CALL = "__call";
 
@@ -148,68 +148,19 @@ namespace {
                 "object:%s(...)", lua_tostring(pState, lua_upvalueindex(4)),
                 lua_tostring(pState, lua_upvalueindex(3)), lua_tostring(pState, lua_upvalueindex(4)));
 
-        char failure[256] = {};
+        auto *const pMethod = static_cast<jfc::lua::interpreter::untyped_method_type *>(
+            lua_touserdata(pState, lua_upvalueindex(1)));
 
-        bool failed = false;
+        std::size_t length = 0;
 
-        int results = 0;
+        const char *const name = lua_tolstring(pState, lua_upvalueindex(5), &length);
 
-        try {
-            auto *pMethod = static_cast<jfc::lua::interpreter::untyped_method_type *>(
-                lua_touserdata(pState, lua_upvalueindex(1)));
+        return jfc::lua::detail::bound_call(pState, 2, std::string_view(name, length), "a method",
+            [self, pMethod](jfc::lua::value_list_type aArguments) {
+                const jfc::lua::userdata object = *self;
 
-            void *ud = nullptr;
-
-            lua_getallocf(pState, &ud);
-
-            const auto *const pLimits = static_cast<const jfc::lua::interpreter_limits *>(ud);
-            const bool timed = pLimits && pLimits->callTimer;
-            const auto began = timed ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
-
-            const jfc::lua::userdata object = *self;
-
-            jfc::lua::value_list_type args;
-
-            for (int i = 2; i <= lua_gettop(pState); ++i) {
-                if (jfc::lua::detail::to_param(pState, i, args)) continue;
-
-                throw jfc::lua::exception("argument " + std::to_string(i - 1) + " is a "
-                    + lua_typename(pState, lua_type(pState, i)) + ", which cannot cross into c++");
-            }
-
-            auto returned = [&] {
-                try { return (*pMethod)(object, std::move(args)); }
-                catch (const std::exception &) { throw; }
-                catch (...) { throw jfc::lua::exception("a method threw something that is not a std::exception"); }
-            }();
-
-            lua_settop(pState, 0);
-
-            if (!lua_checkstack(pState, static_cast<int>(returned.size())))
-                throw jfc::lua::exception("the lua stack cannot grow enough to return this many "
-                    "values");
-
-            for (const auto &value : returned) jfc::lua::detail::push_param(pState, value);
-
-            results = static_cast<int>(returned.size());
-
-            if (timed) {
-                std::size_t length = 0;
-
-                const char *const name = lua_tolstring(pState, lua_upvalueindex(5), &length);
-
-                pLimits->callTimer(std::string_view(name, length), std::chrono::steady_clock::now() - began);
-            }
-        }
-        catch (const std::exception &e) {
-            std::snprintf(failure, sizeof failure, "%s", e.what());
-
-            failed = true;
-        }
-
-        if (failed) return luaL_error(pState, "%s", failure);
-
-        return results;
+                return (*pMethod)(object, std::move(aArguments));
+            });
     }
 
     int _destroy_method(lua_State *pState) {
@@ -280,6 +231,19 @@ namespace jfc::lua::detail {
         }
 
         lua_remove(L, -2);
+    }
+
+    std::optional<std::string> type_name(lua_State *const L, const void *const aTypeKey) {
+        const stack_guard guard(L);
+
+        if (!_push_type_metatable(L, aTypeKey)) return {};
+
+        _push_key(L, &NAME);
+        lua_rawget(L, -2);
+
+        if (lua_type(L, -1) != LUA_TSTRING) return {};
+
+        return std::string(lua_tostring(L, -1));
     }
 
     const userdata *to_userdata(lua_State *const L, const int aIndex) {
@@ -388,6 +352,10 @@ namespace jfc::lua {
             lua_pushstring(L, aName.c_str());
             lua_pushcclosure(L, _tostring, 1);
             lua_setfield(L, metatable, "__tostring");
+
+            _push_key(L, &NAME);
+            lua_pushstring(L, aName.c_str());
+            lua_rawset(L, metatable);
 
             _push_registry_table(L, &TYPES, nullptr);
             _push_key(L, aTypeKey);
