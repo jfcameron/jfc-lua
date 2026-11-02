@@ -28,8 +28,9 @@ namespace jfc::lua::detail
     class call_frame final
     {
     public:
-        //! aFirstArgument is how many values on the stack come before the script's first argument
-        call_frame(lua_State *L, std::string_view aName, int aFirstArgument);
+        //! aFirstArgument is how many values on the stack come before the first one read. aNoun is what those values are
+        //! called in an error
+        call_frame(lua_State *L, std::string_view aName, int aFirstArgument, const char *aNoun);
 
         //! refuses a call given more than aCount arguments
         void expect_at_most(int aCount) const;
@@ -87,6 +88,10 @@ namespace jfc::lua::detail
         lua_State *m_pState;
         std::string_view m_Name;
         int m_FirstArgument;
+        const char *m_Noun;
+
+        //! the name and the position, for the start of an error
+        [[nodiscard]] std::string _where(int aIndex) const;
 
         [[noreturn]] void _refuse(int aIndex, const std::string &aWanted) const;
     };
@@ -161,7 +166,8 @@ namespace jfc::lua::detail
             return 1;
         }
         else {
-            if constexpr (std::is_same_v<value_type, bool>) aFrame.push(aValue);
+            if constexpr (std::is_same_v<value_type, std::nullptr_t>) aFrame.push_nil();
+            else if constexpr (std::is_same_v<value_type, bool>) aFrame.push(aValue);
             else if constexpr (std::is_arithmetic_v<value_type>) aFrame.push(static_cast<double>(aValue));
             else if constexpr (std::is_same_v<value_type, std::string> || std::is_same_v<value_type, std::string_view>)
                 aFrame.push(std::string_view(aValue));
@@ -176,9 +182,9 @@ namespace jfc::lua::detail
                 if (aValue) aFrame.push(userdata::make(aValue));
                 else aFrame.push_nil();
             }
-            else static_assert(always_false<value_type>, "a typed function can return nothing, numbers, bool, "
-                "std::string, std::string_view, const char *, data_table, userdata, std::shared_ptr to a bound type, "
-                "reference, function_reference, value_list_type, or a std::optional or std::tuple of those");
+            else static_assert(always_false<value_type>, "what goes to lua can be numbers, bool, nullptr, std::string, "
+                "std::string_view, const char *, data_table, userdata, std::shared_ptr to a bound type, reference, "
+                "function_reference, or a std::optional or std::tuple of those");
 
             return 1;
         }
@@ -285,6 +291,64 @@ namespace jfc::lua::detail
             "so it cannot be a generic lambda or an overloaded function object");
     }
 
+    template <typename> inline constexpr bool borrows_the_stack = false;
+    template <> inline constexpr bool borrows_the_stack<std::string_view> = true;
+    template <> inline constexpr bool borrows_the_stack<table_view> = true;
+    template <typename value_type> inline constexpr bool borrows_the_stack<std::optional<value_type>>
+        = borrows_the_stack<value_type>;
+    template <typename... value_types> inline constexpr bool borrows_the_stack<std::tuple<value_types...>>
+        = (borrows_the_stack<value_types> || ...);
+
+    template <typename tuple_type, std::size_t... indices>
+    [[nodiscard]] tuple_type read_tuple(const call_frame &aFrame, std::index_sequence<indices...>) {
+        // braces, so that results are read left to right and the first wrong one is the one reported
+        return tuple_type{read_argument<std::tuple_element_t<indices, tuple_type>>(aFrame, static_cast<int>(indices) + 1)...};
+    }
+
+    template <typename result_type>
+    [[nodiscard]] result_type read_results(const call_frame &aFrame) {
+        static_assert(!borrows_the_stack<result_type>,
+            "a typed call's results leave the stack when it ends, so ask for a std::string or a data_table");
+
+        if constexpr (is_tuple<result_type>::value)
+            return read_tuple<result_type>(aFrame, std::make_index_sequence<std::tuple_size_v<result_type>>{});
+        else return read_argument<result_type>(aFrame, 1);
+    }
+
+    template <typename work_type>
+    [[nodiscard]] stack_work make_stack_work(work_type &aWork) {
+        return {&aWork, [](void *const pContext, call_frame &aFrame) { (*static_cast<work_type *>(pContext))(aFrame); }};
+    }
+
+    /// \brief calls aCall with what pushes aArguments and what reads a result_type
+    template <typename result_type, typename call_type, typename... argument_types>
+    [[nodiscard]] call_outcome<result_type> typed_outcome(call_type &&aCall, const argument_types &...aArguments) {
+        static_assert((!std::is_same_v<std::remove_cvref_t<argument_types>, value_list_type> && ...),
+            "a typed call does not take a value_list_type: use the call that takes the list and its results");
+
+        auto push = [&](call_frame &aFrame) {
+            aFrame.reserve(sizeof...(argument_types));
+
+            (static_cast<void>(push_result<std::decay_t<const argument_types>>(aFrame, aArguments)), ...);
+        };
+
+        if constexpr (std::is_void_v<result_type>) {
+            auto read = [](call_frame &) {};
+
+            return aCall(make_stack_work(push), make_stack_work(read));
+        }
+        else {
+            std::optional<result_type> results;
+
+            auto read = [&](call_frame &aFrame) { results.emplace(read_results<result_type>(aFrame)); };
+
+            if (auto error = aCall(make_stack_work(push), make_stack_work(read)))
+                return call_result<result_type>::failed(std::move(*error));
+
+            return call_result<result_type>(std::move(*results));
+        }
+    }
+
     /// \see jfc::lua::method
     template <typename function_type>
     struct named_method final {
@@ -302,6 +366,18 @@ namespace jfc::lua
     template <typename function_type>
     [[nodiscard]] detail::named_method<std::decay_t<function_type>> method(std::string aName, function_type &&aFunction) {
         return {std::move(aName), std::forward<function_type>(aFunction)};
+    }
+
+    template <typename result_type, typename... argument_types>
+    call_outcome<result_type> reference::call(const argument_types &...aArguments) {
+        return detail::typed_outcome<result_type>([this](const detail::stack_work &aPush, const detail::stack_work &aRead)
+            { return _call(aPush, aRead, {}); }, aArguments...);
+    }
+
+    template <typename result_type, typename... argument_types>
+    call_outcome<result_type> function_reference::call(const argument_types &...aArguments) {
+        return detail::typed_outcome<result_type>([this](const detail::stack_work &aPush, const detail::stack_work &aRead)
+            { return _call(aPush, aRead, m_InstructionBudget); }, aArguments...);
     }
 }
 

@@ -430,9 +430,9 @@ namespace jfc::lua {
     void interpreter::set_call_timer(call_timer_type aTimer)
         { m_pLimits->callTimer = std::move(aTimer); }
 
-    interpreter::error_type interpreter::run(const std::string &aLuaScript)
-        { return m_pGlobals->run(aLuaScript); }
+    interpreter::error_type interpreter::run(const std::string &aLuaScript, const std::string_view aName)
+        { return m_pGlobals->run(aLuaScript, aName); }
 
-    interpreter::error_type interpreter::validate_syntax(const std::string &aLuaScript) const
-        { return m_pGlobals->validate_syntax(aLuaScript); }
+    interpreter::error_type interpreter::validate_syntax(const std::string &aLuaScript, const std::string_view aName) const
+        { return m_pGlobals->validate_syntax(aLuaScript, aName); }
 }

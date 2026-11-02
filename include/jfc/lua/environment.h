@@ -16,6 +16,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -64,6 +65,13 @@ namespace jfc::lua
         /// \brief call a lua function, discarding whatever it returns
         [[nodiscard]] error_type call(const path &aPath, const value_list_type &aArguments = {});
 
+        /// \brief call a lua function without going through value lists \see reference::call
+        template <typename result_type = void, typename... argument_types>
+        [[nodiscard]] call_outcome<result_type> call(const path &aPath, const argument_types &...aArguments) {
+            return detail::typed_outcome<result_type>([&](const detail::stack_work &aPush, const detail::stack_work &aRead)
+                { return _call(aPath, aPush, aRead); }, aArguments...);
+        }
+
         /// \brief registers a closure (c++ lambda with captured data) into this environment alone
         void register_function(const path &aName, closure_type aClosure);
 
@@ -96,10 +104,15 @@ namespace jfc::lua
         /// This is not required to called before running a script, a typical use case
         /// would be in a script editor, in order to catch syntax errors in a script
         /// that is actively being developed.
-        [[nodiscard]] error_type validate_syntax(const std::string &aLuaScript) const;
+        ///
+        /// \param aName the script's name in errors. \see run
+        [[nodiscard]] error_type validate_syntax(const std::string &aLuaScript, std::string_view aName = {}) const;
 
         /// \brief run a script here, returns an error if something went wrong
-        [[nodiscard]] error_type run(const std::string &aLuaScript);
+        ///
+        /// \param aName what errors call this script, and the functions it defines, for as long as they live: usually its
+        /// file, as in `rules.lua:3: the bucket leaks`. Empty leaves lua to quote the script.
+        [[nodiscard]] error_type run(const std::string &aLuaScript, std::string_view aName = {});
 
         environment(const environment &) = delete;
         environment &operator=(const environment &) = delete;
@@ -112,6 +125,9 @@ namespace jfc::lua
 
         //! registers aClosure at aName, yielding its results if aYields. \see register_function
         void _register(const path &aName, detail::typed_closure_type aClosure, bool aYields);
+
+        //! a typed call of what is at aPath
+        [[nodiscard]] error_type _call(const path &aPath, const detail::stack_work &aPush, const detail::stack_work &aRead);
 
         std::optional<std::size_t> m_InstructionBudget;
     };

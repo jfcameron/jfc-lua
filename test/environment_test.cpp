@@ -670,3 +670,64 @@ TEST_CASE("safe is what an environment gets unless it asks otherwise", "[environ
         REQUIRE(interp.read_string("probe") != "nil");
     }
 }
+
+TEST_CASE("a script can be given a name for its errors to use", "[environment][chunk]") {
+    interpreter interp;
+
+    auto env = interp.make_environment();
+
+    SECTION("an error while running") {
+        REQUIRE(env->run("\nerror('the bucket leaks')", "rules.lua") == "rules.lua:2: the bucket leaks");
+    }
+
+    SECTION("a syntax error") {
+        const auto error = env->run("local = 1", "rules.lua");
+
+        REQUIRE(error);
+        REQUIRE(error->starts_with("rules.lua:1:"));
+    }
+
+    SECTION("a syntax error being checked for") {
+        const auto error = env->validate_syntax("\nlocal = 1", "rules.lua");
+
+        REQUIRE(error);
+        REQUIRE(error->starts_with("rules.lua:2:"));
+    }
+
+    SECTION("a function it defined, called later") {
+        REQUIRE_FALSE(env->run("function fails()\n\n error('the bucket leaks') end", "rules.lua"));
+
+        REQUIRE(env->call("fails") == "rules.lua:3: the bucket leaks");
+    }
+
+    SECTION("a typed function's refusal") {
+        env->register_function("takes", [](const double) {});
+
+        REQUIRE(env->run("\ntakes('a')", "rules.lua") == "rules.lua:2: takes: argument 1 wants a number, got a string");
+    }
+
+    SECTION("on the interpreter too") {
+        REQUIRE(interp.run("error('the bucket leaks')", "rules.lua") == "rules.lua:1: the bucket leaks");
+
+        const auto error = interp.validate_syntax("local = 1", "rules.lua");
+
+        REQUIRE(error);
+        REQUIRE(error->starts_with("rules.lua:1:"));
+    }
+
+    SECTION("a name with a directory") {
+        REQUIRE(env->run("error('no')", "modules/base/rules.lua") == "modules/base/rules.lua:1: no");
+    }
+
+    SECTION("a long name keeps its end") {
+        const auto error = env->run("error('no')", std::string(100, 'd') + "/rules.lua");
+
+        REQUIRE(error);
+        REQUIRE(error->find("/rules.lua:1: no") != std::string::npos);
+    }
+
+    SECTION("without one, or with an empty one, the script names itself") {
+        REQUIRE(env->run("error('no')") == "[string \"error('no')\"]:1: no");
+        REQUIRE(env->run("error('no')", "") == "[string \"error('no')\"]:1: no");
+    }
+}

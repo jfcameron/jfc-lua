@@ -28,7 +28,15 @@ namespace jfc::lua
     class table_view;
     class userdata;
 
-    namespace detail { class call_frame; }
+    namespace detail {
+        class call_frame;
+
+        /// \brief something for a typed call to do to the stack, kept to a pointer and a function so that it costs nothing
+        struct stack_work final {
+            void *pContext;
+            void (*run)(void *pContext, call_frame &aFrame);
+        };
+    }
 
     /// \brief what a lua table may be indexed by
     using key_type = std::variant<double, bool, std::string>;

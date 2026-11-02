@@ -256,6 +256,20 @@ namespace {
             for (std::size_t i = 0; i < HOST_CALLS; ++i) require_nothing(env->call("hook", arguments, results));
         });
 
+        report("fresh lists", "three numbers, a result", HOST_CALLS, [&] {
+            for (std::size_t i = 0; i < HOST_CALLS; ++i) {
+                value_list_type fresh;
+
+                require_nothing(env->call("hook", {1.0, 2.0, 3.0}, fresh));
+            }
+        });
+
+        double total = 0;
+
+        report("typed", "three numbers, a result", HOST_CALLS, [&] {
+            for (std::size_t i = 0; i < HOST_CALLS; ++i) total += *env->call<double>("hook", 1.0, 2.0, 3.0);
+        });
+
         const path hook("hook");
 
         report("built path", "three numbers, a result", HOST_CALLS, [&] {
@@ -266,6 +280,18 @@ namespace {
 
         report("reference", "three numbers, a result", HOST_CALLS, [&] {
             for (std::size_t i = 0; i < HOST_CALLS; ++i) require_nothing(held.call(arguments, results));
+        });
+
+        report("typed ref", "three numbers, a result", HOST_CALLS, [&] {
+            for (std::size_t i = 0; i < HOST_CALLS; ++i) total += *held.call<double>(1.0, 2.0, 3.0);
+        });
+
+        report("fresh ref", "three numbers, a result", HOST_CALLS, [&] {
+            for (std::size_t i = 0; i < HOST_CALLS; ++i) {
+                value_list_type fresh;
+
+                require_nothing(held.call({1.0, 2.0, 3.0}, fresh));
+            }
         });
 
         report("environment", "on.update, nothing", HOST_CALLS, [&] {
@@ -283,6 +309,8 @@ namespace {
         report("reference", "on.update, nothing", HOST_CALLS, [&] {
             for (std::size_t i = 0; i < HOST_CALLS; ++i) require_nothing(heldUpdate.call());
         });
+
+        std::printf("  %-11s %-24s %9.1f\n", "", "(sink)", total);
     }
 
     void reading_raw() {

@@ -10,6 +10,7 @@
 #include <jfc/lua/userdata.h>
 #include <jfc/lua/data_table.h>
 
+#include <cstring>
 #include <functional>
 #include <new>
 #include <optional>
@@ -375,55 +376,101 @@ namespace jfc::lua {
 
     namespace {
         /// \param aWhat makes the name an error calls this by, which is too slow to make for a call that works
-        template <typename what_type>
-        [[nodiscard]] error_type _invoke(lua_State *const L, const what_type &aWhat,
-            const value_list_type &aArguments, value_list_type &aResults)
+        /// \param aPush pushes the arguments, given the stack's top, and returns how many it pushed
+        /// \param aRead takes the results, given where they begin
+        template <typename what_type, typename push_type, typename read_type>
+        [[nodiscard]] error_type _invoke(lua_State *const L, const what_type &aWhat, const push_type &aPush,
+            const read_type &aRead)
         {
             if (lua_type(L, -1) != LUA_TFUNCTION)
                 return aWhat() + " holds a " + lua_typename(L, lua_type(L, -1)) + ", not a function";
 
-            if (!lua_checkstack(L, static_cast<int>(aArguments.size()) + 2))
-                return "the lua stack cannot grow enough to make this call";
-
             const int base = lua_gettop(L);
 
-            for (const auto &argument : aArguments) jfc::lua::detail::push_param(L, argument);
+            int pushed = 0;
 
-            if (lua_pcall(L, static_cast<int>(aArguments.size()), LUA_MULTRET, 0) != LUA_OK)
+            try { pushed = aPush(base); }
+            catch (const exception &e) { return e.what(); }
+
+            if (lua_pcall(L, pushed, LUA_MULTRET, 0) != LUA_OK)
                 return _to_string(L, -1).value_or("lua reported an error it could not describe");
 
-            for (int i = base; i <= lua_gettop(L); ++i) {
-                const auto unconverted = [&](const std::string &aWhy) -> error_type {
-                    aResults.clear();
-
-                    return aWhat() + " returned a " + lua_typename(L, lua_type(L, i))
-                        + " in position " + std::to_string(i - base + 1) + aWhy;
-                };
-
-                try {
-                    if (!jfc::lua::detail::to_param(L, i, aResults)) return unconverted(", which cannot cross into c++");
-                }
-                catch (const exception &e) { return unconverted(" that cannot cross into c++: " + std::string(e.what())); }
-            }
-
-            return {};
+            return aRead(base);
         }
 
-        template <typename what_type, typename find_type>
-        [[nodiscard]] error_type _protected_invoke(lua_State *const L, const what_type &aWhat,
-            const value_list_type &aArguments, value_list_type &aResults, find_type &&aFind) {
+        template <typename what_type, typename find_type, typename push_type, typename read_type>
+        [[nodiscard]] error_type _protected_invoke(lua_State *const L, const what_type &aWhat, find_type &&aFind,
+            const push_type &aPush, const read_type &aRead) {
             error_type error;
 
             if (const auto raised = detail::protect(L, [&](lua_State *) {
                 if (const auto missing = aFind()) error = *missing;
-                else error = _invoke(L, aWhat, aArguments, aResults);
-            })) {
-                aResults.clear();
-
-                return raised;
-            }
+                else error = _invoke(L, aWhat, aPush, aRead);
+            })) return raised;
 
             return error;
+        }
+
+        [[nodiscard]] auto _push_list(lua_State *const L, const value_list_type &aArguments) {
+            return [L, &aArguments](int) {
+                if (!lua_checkstack(L, static_cast<int>(aArguments.size()) + 2))
+                    throw exception("the lua stack cannot grow enough to make this call");
+
+                for (const auto &argument : aArguments) jfc::lua::detail::push_param(L, argument);
+
+                return static_cast<int>(aArguments.size());
+            };
+        }
+
+        template <typename what_type>
+        [[nodiscard]] auto _read_list(lua_State *const L, const what_type &aWhat, value_list_type &aResults) {
+            return [L, &aWhat, &aResults](const int aBase) -> error_type {
+                for (int i = aBase; i <= lua_gettop(L); ++i) {
+                    const auto unconverted = [&](const std::string &aWhy) -> error_type {
+                        return aWhat() + " returned a " + lua_typename(L, lua_type(L, i))
+                            + " in position " + std::to_string(i - aBase + 1) + aWhy;
+                    };
+
+                    try {
+                        if (!jfc::lua::detail::to_param(L, i, aResults)) return unconverted(", which cannot cross into c++");
+                    }
+                    catch (const exception &e) { return unconverted(" that cannot cross into c++: " + std::string(e.what())); }
+                }
+
+                return {};
+            };
+        }
+
+        [[nodiscard]] auto _push_work(lua_State *const L, const detail::stack_work &aWork) {
+            return [L, &aWork](const int aBase) {
+                detail::call_frame frame(L, {}, aBase, "argument");
+
+                aWork.run(aWork.pContext, frame);
+
+                return lua_gettop(L) - aBase;
+            };
+        }
+
+        template <typename what_type>
+        [[nodiscard]] auto _read_work(lua_State *const L, const what_type &aWhat, const detail::stack_work &aWork) {
+            return [L, &aWhat, &aWork](const int aBase) -> error_type {
+                try {
+                    detail::call_frame frame(L, {}, aBase - 1, "result");
+
+                    aWork.run(aWork.pContext, frame);
+
+                    return {};
+                }
+                catch (const exception &e) { return aWhat() + ": " + e.what(); }
+            };
+        }
+
+        [[nodiscard]] std::string _name_of(const path &aPath) {
+            std::ostringstream where;
+
+            where << aPath;
+
+            return where.str();
         }
     }
 
@@ -439,19 +486,35 @@ namespace jfc::lua {
 
         aResults.clear();
 
-        const auto what = [&aPath] {
-            std::ostringstream where;
+        const auto what = [&aPath] { return _name_of(aPath); };
 
-            where << aPath;
-
-            return where.str();
-        };
-
-        return _protected_invoke(L, what, aArguments, aResults, [&]() -> error_type {
+        auto error = _protected_invoke(L, what, [&]() -> error_type {
             if (!_read_value(L, registry_reference(), aPath)) return what() + " does not resolve";
 
             return {};
-        });
+        }, _push_list(L, aArguments), _read_list(L, what, aResults));
+
+        if (error) aResults.clear();
+
+        return error;
+    }
+
+    error_type environment::_call(const path &aPath, const detail::stack_work &aPush, const detail::stack_work &aRead) {
+        auto *L = state();
+
+        const stack_guard guard(L);
+        const root_scope root(L, registry_reference());
+        const budget_scope budget(L, m_InstructionBudget);
+
+        if (budget.aborted()) return "script exceeded its instruction budget";
+
+        const auto what = [&aPath] { return _name_of(aPath); };
+
+        return _protected_invoke(L, what, [&]() -> error_type {
+            if (!_read_value(L, registry_reference(), aPath)) return what() + " does not resolve";
+
+            return {};
+        }, _push_work(L, aPush), _read_work(L, what, aRead));
     }
 
     error_type reference::call(const value_list_type &aArguments, value_list_type &aResults)
@@ -471,11 +534,34 @@ namespace jfc::lua {
 
         const auto what = [] { return std::string("the reference"); };
 
-        return _protected_invoke(L, what, aArguments, aResults, [&]() -> error_type {
+        auto error = _protected_invoke(L, what, [&]() -> error_type {
             lua_rawgeti(L, LUA_REGISTRYINDEX, registry_reference());
 
             return {};
-        });
+        }, _push_list(L, aArguments), _read_list(L, what, aResults));
+
+        if (error) aResults.clear();
+
+        return error;
+    }
+
+    error_type reference::_call(const detail::stack_work &aPush, const detail::stack_work &aRead,
+        const std::optional<std::size_t> aInstructionBudget) {
+        auto *L = state();
+
+        const stack_guard guard(L);
+
+        const budget_scope budget(L, aInstructionBudget);
+
+        if (budget.aborted()) return "script exceeded its instruction budget";
+
+        const auto what = [] { return std::string("the reference"); };
+
+        return _protected_invoke(L, what, [&]() -> error_type {
+            lua_rawgeti(L, LUA_REGISTRYINDEX, registry_reference());
+
+            return {};
+        }, _push_work(L, aPush), _read_work(L, what, aRead));
     }
 
     error_type reference::call(const value_list_type &aArguments) {
@@ -543,7 +629,7 @@ namespace jfc::lua {
             auto *const pImpl = static_cast<registered_closure *>(lua_touserdata(pState, lua_upvalueindex(1)));
 
             return detail::guarded_call(pState, pImpl->name, [pImpl, pState] {
-                detail::call_frame frame(pState, pImpl->name, 0);
+                detail::call_frame frame(pState, pImpl->name, 0, "argument");
 
                 return pImpl->closure(frame);
             });
@@ -632,7 +718,18 @@ namespace jfc::lua {
         return coroutine(std::move(*thread), m_InstructionBudget);
     }
 
-    environment::error_type environment::run(const std::string &aLuaScript) {
+    namespace {
+        /// \brief loads aLuaScript as luaL_loadstring does, calling it aName if it has one
+        [[nodiscard]] int _load(lua_State *const L, const std::string &aLuaScript, const std::string_view aName) {
+            if (aName.empty()) return luaL_loadstring(L, aLuaScript.c_str());
+
+            const std::string chunkName = "@" + std::string(aName);
+
+            return luaL_loadbuffer(L, aLuaScript.c_str(), std::strlen(aLuaScript.c_str()), chunkName.c_str());
+        }
+    }
+
+    environment::error_type environment::run(const std::string &aLuaScript, const std::string_view aName) {
         auto *L = state();
 
         const stack_guard guard(L);
@@ -641,7 +738,7 @@ namespace jfc::lua {
 
         if (budget.aborted()) return "script exceeded its instruction budget";
 
-        if (luaL_loadstring(L, aLuaScript.c_str()) != LUA_OK)
+        if (_load(L, aLuaScript, aName) != LUA_OK)
             return _to_string(L, -1).value_or("lua reported an error it could not describe");
 
         if (budget.instruction_budget()) _disable_jit_for_chunk(L, budget.limits());
@@ -652,13 +749,13 @@ namespace jfc::lua {
         return {};
     }
 
-    environment::error_type environment::validate_syntax(const std::string &aLuaScript) const {
+    environment::error_type environment::validate_syntax(const std::string &aLuaScript, const std::string_view aName) const {
         auto *L = state();
 
         const stack_guard guard(L);
         const root_scope root(L, registry_reference());
 
-        if (luaL_loadstring(L, aLuaScript.c_str()) == LUA_OK) return {};
+        if (_load(L, aLuaScript, aName) == LUA_OK) return {};
 
         return _to_string(L, -1).value_or("lua reported an error it could not describe");
     }

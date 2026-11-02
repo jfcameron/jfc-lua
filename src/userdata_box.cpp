@@ -158,7 +158,7 @@ namespace {
         const std::string_view name(text, length);
 
         return jfc::lua::detail::guarded_call(pState, name, [self, pMethod, pState, name] {
-            jfc::lua::detail::call_frame frame(pState, name, 1);
+            jfc::lua::detail::call_frame frame(pState, name, 1, "argument");
 
             return (*pMethod)(*self, frame);
         });

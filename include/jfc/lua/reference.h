@@ -12,6 +12,8 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -26,6 +28,47 @@ namespace jfc::lua
         data_table, // a restricted form of lua's table type (see data_table.h)
         userdata // lua's userdata type
     >>;
+
+    /// \brief what a typed call gave back, or what went wrong: `if (result) use(*result); else log(result.error());`
+    ///
+    /// Converts to true when it holds a value, where an error_type converts to true when something went wrong.
+    template <typename value_type>
+    class call_result final
+    {
+    public:
+        explicit call_result(value_type aValue)
+        : m_Held(std::in_place_index<0>, std::move(aValue))
+        {}
+
+        [[nodiscard]] static call_result failed(std::string aError) { return call_result(std::move(aError), failure{}); }
+
+        [[nodiscard]] bool has_value() const { return m_Held.index() == 0; }
+
+        explicit operator bool() const { return has_value(); }
+
+        [[nodiscard]] value_type &operator*() { return std::get<0>(m_Held); }
+        [[nodiscard]] const value_type &operator*() const { return std::get<0>(m_Held); }
+
+        [[nodiscard]] value_type *operator->() { return &std::get<0>(m_Held); }
+        [[nodiscard]] const value_type *operator->() const { return &std::get<0>(m_Held); }
+
+        /// \brief what went wrong, or nothing if it holds a value
+        [[nodiscard]] error_type error() const
+            { return has_value() ? error_type{} : error_type{std::get<1>(m_Held)}; }
+
+    private:
+        struct failure final {};
+
+        call_result(std::string aError, failure)
+        : m_Held(std::in_place_index<1>, std::move(aError))
+        {}
+
+        std::variant<value_type, std::string> m_Held;
+    };
+
+    /// \brief what a typed call returns: a call_result of result_type, or just an error_type if there is none
+    template <typename result_type>
+    using call_outcome = std::conditional_t<std::is_void_v<result_type>, error_type, call_result<result_type>>;
 
     /// \brief a handle to a value that lives in lua
     class reference
@@ -45,6 +88,15 @@ namespace jfc::lua
 
         /// \brief call the referenced value, discarding whatever it returns
         [[nodiscard]] error_type call(const value_list_type &aArguments = {});
+
+        /// \brief call the referenced value without going through value lists
+        ///
+        /// Arguments can be numbers, bool, strings, nullptr for nil, data_table, userdata, a std::shared_ptr to a bound
+        /// type, a reference, or a std::optional or std::tuple of those. result_type can be what a typed function takes,
+        /// but owned: not a std::string_view or a table_view, whose values leave the stack with the call. A std::tuple is
+        /// several results, and extra results are dropped.
+        template <typename result_type = void, typename... argument_types>
+        [[nodiscard]] call_outcome<result_type> call(const argument_types &...aArguments);
 
         [[nodiscard]] bool operator==(const reference &aOther) const;
 
@@ -135,6 +187,10 @@ namespace jfc::lua
         [[nodiscard]] error_type _call(const value_list_type &aArguments, value_list_type &aResults,
             std::optional<std::size_t> aInstructionBudget);
 
+        /// \brief the same for a typed call
+        [[nodiscard]] error_type _call(const detail::stack_work &aPush, const detail::stack_work &aRead,
+            std::optional<std::size_t> aInstructionBudget);
+
     private:
         friend class environment;
         friend class interpreter;
@@ -161,6 +217,10 @@ namespace jfc::lua
         /// \brief call the function, discarding whatever it returns
         [[nodiscard]] error_type call(const value_list_type &aArguments = {});
 
+        /// \brief call the function without going through value lists \see reference::call
+        template <typename result_type = void, typename... argument_types>
+        [[nodiscard]] call_outcome<result_type> call(const argument_types &...aArguments);
+
     private:
         friend class detail::call_frame;
 
@@ -170,5 +230,7 @@ namespace jfc::lua
         std::optional<std::size_t> m_InstructionBudget;
     };
 }
+
+#include <jfc/lua/typed_call.h>
 
 #endif
