@@ -42,15 +42,20 @@ namespace jfc::lua::detail {
         }
     }
 
-    call_frame::call_frame(lua_State *const L, const std::string_view aName, const int aFirstArgument)
+    call_frame::call_frame(lua_State *const L, const std::string_view aName, const int aFirstArgument,
+        const char *const aNoun)
     : m_pState(L)
     , m_Name(aName)
     , m_FirstArgument(aFirstArgument)
+    , m_Noun(aNoun)
     {}
 
+    std::string call_frame::_where(const int aIndex) const {
+        return (m_Name.empty() ? std::string() : std::string(m_Name) + ": ") + m_Noun + " " + std::to_string(aIndex);
+    }
+
     void call_frame::_refuse(const int aIndex, const std::string &aWanted) const {
-        throw exception(std::string(m_Name) + ": argument " + std::to_string(aIndex) + " wants " + aWanted + ", got "
-            + _describe(m_pState, aIndex + m_FirstArgument));
+        throw exception(_where(aIndex) + " wants " + aWanted + ", got " + _describe(m_pState, aIndex + m_FirstArgument));
     }
 
     void call_frame::expect_at_most(const int aCount) const {
@@ -93,7 +98,7 @@ namespace jfc::lua::detail {
 
         write_number(wanted, value);
 
-        throw exception(std::string(m_Name) + ": argument " + std::to_string(aIndex) + " wants " + wanted.str());
+        throw exception(_where(aIndex) + " wants " + wanted.str());
     }
 
     bool call_frame::boolean(const int aIndex) const {
@@ -135,8 +140,8 @@ namespace jfc::lua::detail {
         for (int i = first; i <= last; ++i) {
             if (to_param(m_pState, i, out)) continue;
 
-            throw exception("argument " + std::to_string(i - m_FirstArgument) + " is a "
-                + lua_typename(m_pState, lua_type(m_pState, i)) + ", which cannot cross into c++");
+            throw exception(_where(i - m_FirstArgument) + " is a " + lua_typename(m_pState, lua_type(m_pState, i))
+                + ", which cannot cross into c++");
         }
 
         return out;

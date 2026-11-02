@@ -137,6 +137,11 @@ namespace jfc::lua {
         /// \brief call a lua function, discarding whatever it returns
         [[nodiscard]] error_type call(const path &aPath, const value_list_type &aArguments = {});
 
+        /// \brief call a lua function without going through value lists \see reference::call
+        template <typename result_type = void, typename... argument_types>
+        [[nodiscard]] call_outcome<result_type> call(const path &aPath, const argument_types &...aArguments)
+            { return m_pGlobals->template call<result_type>(aPath, aArguments...); }
+
         /// \brief registers a closure (c++ lambda with captured data)
         void register_function(const path &aName, closure_type aClosure);
 
@@ -197,10 +202,14 @@ namespace jfc::lua {
             { return hold(userdata::make(aObject)); }
 
         /// \brief checks for basic syntax errors.
-        [[nodiscard]] error_type validate_syntax(const std::string &aLuaScript) const;
+        ///
+        /// \param aName the script's name in errors. \see environment::run
+        [[nodiscard]] error_type validate_syntax(const std::string &aLuaScript, std::string_view aName = {}) const;
         
         /// \brief run a script, returns an error if something went wrong
-        [[nodiscard]] error_type run(const std::string &aLuaScript);
+        ///
+        /// \param aName the script's name in errors. \see environment::run
+        [[nodiscard]] error_type run(const std::string &aLuaScript, std::string_view aName = {});
         
         /// \brief construct an interpreter
         ///

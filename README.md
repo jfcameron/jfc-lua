@@ -61,6 +61,9 @@ A `function_reference` is a function the script passed, to call during the call 
 
 A trailing `value_list_type` takes every argument left, for a function that is only partly fixed. On its own it is a function whose arguments are decided at run time, which remains an ordinary way to write one, though typed functions are faster.
 
+### Script names
+`run` and `validate_syntax` take a name for the script, usually its file, which errors use for it and for every function it defines: `rules.lua:3: the bucket leaks`. Without one, Lua quotes the start of the script instead.
+
 ### Paths
 Values are read and written by path, in the same form Lua uses: `"player.hitbox.bounds.x"`, `"names[1]"`. A path can also be written out as its keys, `{"names", 1}`, for one assembled at runtime.
 
@@ -86,6 +89,15 @@ lua.register_type<label>("label",
 Any Lua function can be made into a coroutine, which C++ resumes, and which runs until it yields or returns. A function can be registered as yielding, so that a script calling it is suspended until C++ resumes it again: a `wait(seconds)` that a script calls in the middle of a loop, for example, without the script having to be written as a state machine.
 
 ### Calling Lua from C++
+`call` takes its arguments directly and names what it wants back, instead of going through value lists:
+
+```cpp
+if (const auto damage = hook.call<double>(1.5, "fire")) apply(*damage);
+else log(damage.error());
+```
+
+A result of the wrong type is an error, such as `on.hit: result 1 wants a number, got a string`, and a `std::tuple` asks for several. With no type named it returns the `error_type` alone, as a call of a value list does. Results are owned, so a `std::string_view` or a `table_view` cannot be asked for.
+
 A `path` built once is faster than a string parsed for every call, and a `reference` taken with `read_reference` is faster again, since it skips finding the function: about half the time of a call by name. Use one for anything called every frame.
 
 ### Limits
