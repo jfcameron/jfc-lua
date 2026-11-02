@@ -7,7 +7,6 @@
 #include <jfc/lua/interpreter.h>
 #include <jfc/lua/data_table.h>
 
-#include <cstdio>
 #include <cstdlib>
 #include <memory>
 #include <optional>
@@ -88,8 +87,7 @@ namespace {
         bool carryOn = false;
 
         if (limits->onExhausted) {
-            // A c++ exception cannot cross the longjmp lua raises errors with, so one thrown here
-            // would unwind through the vm and leave it in pieces, so its treated as "stop".
+            // a c++ exception thrown here would unwind through the vm and leave it in pieces, so it's treated as "stop"
             try { carryOn = limits->onExhausted(limits->instructionsSeen); }
             catch (...) { carryOn = false; }
         }
@@ -247,6 +245,7 @@ namespace jfc::lua {
         m_pLimits->growthCap = aPolicy.MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN;
         m_pLimits->instructionBudget = aPolicy.INSTRUCTION_BUDGET;
         m_pLimits->onExhausted = aPolicy.ON_INSTRUCTION_BUDGET_EXHAUSTED;
+        m_pLimits->onPanic = aPolicy.ON_PANIC;
 
         auto *const state = luaL_newstate();
 
@@ -271,10 +270,18 @@ namespace jfc::lua {
         auto *L = m_pState.get();
 
         lua_atpanic(L, [](lua_State *pState) {
-            const char *const message = lua_tostring(pState, -1);
+            void *ud = nullptr;
 
-            std::fprintf(stderr, "PANIC: unprotected error in call to lua api (%s)\n",
-                message ? message : "no description");
+            lua_getallocf(pState, &ud);
+
+            const auto *const pLimits = static_cast<const interpreter_limits *>(ud);
+
+            if (pLimits && pLimits->onPanic) {
+                const char *const message = lua_tostring(pState, -1);
+
+                try { pLimits->onPanic(message ? message : "no description"); }
+                catch (...) {}
+            }
 
             return 0;
         });

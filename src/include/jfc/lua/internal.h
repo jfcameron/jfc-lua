@@ -72,6 +72,9 @@ namespace jfc::lua {
         //! what to do when the budget is reached; empty means stop
         std::function<bool(const std::size_t)> onExhausted;
 
+        //! told of an error nothing was protecting against
+        std::function<void(std::string_view)> onPanic;
+
         //! told of every call a script makes into a registered function
         std::function<void(std::string_view, std::chrono::nanoseconds)> callTimer;
 
@@ -116,7 +119,7 @@ namespace jfc::lua::detail {
     /// \brief runs aWork so that a lua error raised in it -- a metamethod's, running out of memory -- comes back as its
     /// message instead of ending the program. A std::exception aWork throws is thrown again once the call is over.
     ///
-    /// PUC Lua raises with longjmp, so aWork holds nothing with a destructor across a lua call that can raise.
+    /// Lua's errors are c++ exceptions on both backends, so they unwind aWork's objects on their way here.
     template <typename work_type>
     [[nodiscard]] std::optional<std::string> protect(lua_State *const L, work_type &&aWork) {
         struct context final {
@@ -152,8 +155,7 @@ namespace jfc::lua::detail {
     /// \brief a script's call into c++: aWork runs, and the call timer hears of it under aName. Returns what aWork does,
     /// how many results it pushed.
     ///
-    /// A failure is raised as a lua error once this call's own objects are gone, since PUC Lua raises with longjmp. The
-    /// caller and aWork's captures hold nothing with a destructor for the same reason.
+    /// A failure is raised as a lua error after its catch has finished, so its message is copied out first.
     template <typename work_type>
     [[nodiscard]] int guarded_call(lua_State *const L, const std::string_view aName, work_type &&aWork) {
         char failure[256] = {};
@@ -184,40 +186,6 @@ namespace jfc::lua::detail {
         if (failed) return luaL_error(L, "%s", failure);
 
         return results;
-    }
-
-    /// \brief guarded_call for a value list: the arguments from aFirstArgument up go to aCall, and what it returns goes
-    /// back on the stack. aWho names the caller in the error for something that is not a std::exception.
-    template <typename call_type>
-    [[nodiscard]] int bound_call(lua_State *const L, const int aFirstArgument, const std::string_view aName,
-        const char *const aWho, call_type &&aCall) {
-        return guarded_call(L, aName, [&] {
-            value_list_type arguments;
-
-            arguments.reserve(static_cast<std::size_t>(lua_gettop(L) - aFirstArgument + 1));
-
-            for (int i = aFirstArgument; i <= lua_gettop(L); ++i) {
-                if (to_param(L, i, arguments)) continue;
-
-                throw exception("argument " + std::to_string(i - aFirstArgument + 1) + " is a "
-                    + lua_typename(L, lua_type(L, i)) + ", which cannot cross into c++");
-            }
-
-            auto returned = [&] {
-                try { return aCall(std::move(arguments)); }
-                catch (const std::exception &) { throw; }
-                catch (...) { throw exception(std::string(aWho) + " threw something that is not a std::exception"); }
-            }();
-
-            lua_settop(L, 0);
-
-            if (!lua_checkstack(L, static_cast<int>(returned.size())))
-                throw exception("the lua stack cannot grow enough to return this many values");
-
-            for (const auto &value : returned) push_param(L, value);
-
-            return static_cast<int>(returned.size());
-        });
     }
 }
 

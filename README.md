@@ -59,7 +59,7 @@ A table it reads may hold anything, since only what is asked for is looked at, a
 
 A `function_reference` is a function the script passed, to call during the call or to keep and call later. It runs in the environment that made it, and under the instruction budget of the environment it was given to. A `reference` takes any value but nil in the same way, so a table can be kept without a copy, and read later as it is by then. Either can be returned. Keeping one inside something Lua owns, such as a registered closure's captures, keeps the interpreter's state alive for good.
 
-These are faster than a function taking a value list, which remains the way to write a function whose arguments are decided at run time. Both share the same exception handling and call timer. Methods of bound types take value lists.
+A trailing `value_list_type` takes every argument left, for a function that is only partly fixed. On its own it is a function whose arguments are decided at run time, which remains an ordinary way to write one, though typed functions are faster.
 
 ### Paths
 Values are read and written by path, in the same form Lua uses: `"player.hitbox.bounds.x"`, `"names[1]"`. A path can also be written out as its keys, `{"names", 1}`, for one assembled at runtime.
@@ -74,11 +74,28 @@ A data table is a Lua table restricted to what can be saved: numbers, booleans, 
 ### Userdata
 A C++ object is given to Lua as a `std::shared_ptr`, and both sides own it: the object lives until neither C++ nor any script holds it, so neither can leave the other with a dangling pointer. The same object is always the same Lua value, so a script can compare objects and use them as keys. Registering a type gives its objects methods, called as `object:name(arguments)`, and scripts can also set fields of their own on an object. Reading an object back as the wrong type gives nothing rather than a bad cast.
 
+Methods can say what they take the same way, each named with `method`. The first parameter is the object, and arguments are numbered from the one after it. Methods taking value lists can sit among them, so a type can move to this one method at a time:
+
+```cpp
+lua.register_type<label>("label",
+    method("set_text", [](label &aLabel, const std::string_view aText) { aLabel.text = aText; }),
+    method("text", [](const label &aLabel) { return aLabel.text; }));
+```
+
 ### Coroutines
 Any Lua function can be made into a coroutine, which C++ resumes, and which runs until it yields or returns. A function can be registered as yielding, so that a script calling it is suspended until C++ resumes it again: a `wait(seconds)` that a script calls in the middle of a loop, for example, without the script having to be written as a state machine.
 
+### Calling Lua from C++
+A `path` built once is faster than a string parsed for every call, and a `reference` taken with `read_reference` is faster again, since it skips finding the function: about half the time of a call by name. Use one for anything called every frame.
+
 ### Limits
 An interpreter can be given a memory budget for the whole state, a memory budget for how much one run may add to it, and an instruction budget for how much one run may execute. An environment can have an instruction budget of its own. When a script reaches its instruction budget it stops with an error, as it does when allocation goes over a memory budget, unless the program has given a callback that chooses to let it carry on. This stops an infinite loop or a runaway allocation in a script from taking the program down with it. Under LuaJIT, code run under an instruction budget is kept off the JIT, since compiled code is not counted. A call timer can also be set to time every call scripts make into registered functions, to see which of them a script spends its time in.
+
+## Installing
+`cmake --install` installs the library, its Lua backend and its headers, and `find_package(jfclua)` provides `jfc::lua`. No Lua header is installed, as none is needed to use the library. `test/consume` is a project that does this.
+
+## Benchmarks
+The `linux-gcc-bench` and `linux-gcc-lua51-bench` presets build `jfclua_bench`, which times calls in each direction against the raw Lua API, and counts allocations exactly.
 
 ## Why Lua 5.1?
 Because it is what LuaJIT implements, and LuaJIT is by far the fastest Lua there is. Its weakness is that its interpreter is machine code, written for x86, ARM, PPC and MIPS, so it has no WebAssembly target, and cannot have one, since a page in a browser cannot write machine code to run. The reference implementation of Lua 5.1 is plain C, and builds anywhere a C compiler does, Emscripten included, so a browser build uses it. Apple's devices use it too. LuaJIT runs there without its JIT, which they forbid, and unwinds its errors itself rather than through the C++ runtime, so an error raised while jfc-lua's C++ code holds objects would skip their destructors. The reference implementation is built as C++, so its errors are C++ exceptions and unwind like any other. CI builds the Emscripten version and runs its tests under node, where the limits work as they do on the desktop.

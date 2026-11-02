@@ -73,6 +73,26 @@
       }
     },
     {
+      "name": "linux-gcc-bench",
+      "displayName": "Linux / gcc / bench",
+      "description": "the benchmark harness, jfclua_bench",
+      "inherits": "linux-gcc",
+      "cacheVariables": {
+        "JFCLUA_BUILD_BENCH": "ON",
+        "JFCLUA_BUILD_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "linux-gcc-lua51-bench",
+      "displayName": "Linux / gcc / puc lua 5.1 / bench",
+      "description": "the benchmark harness on the reference implementation",
+      "inherits": "linux-gcc-lua51",
+      "cacheVariables": {
+        "JFCLUA_BUILD_BENCH": "ON",
+        "JFCLUA_BUILD_TESTS": "OFF"
+      }
+    },
+    {
       "name": "macos-clang",
       "displayName": "macOS / clang / libc++",
       "inherits": "base",
@@ -232,6 +252,20 @@
     }
   ],
   "buildPresets": [
+    {
+      "name": "linux-gcc-bench",
+      "configurePreset": "linux-gcc-bench",
+      "targets": [
+        "jfclua_bench"
+      ]
+    },
+    {
+      "name": "linux-gcc-lua51-bench",
+      "configurePreset": "linux-gcc-lua51-bench",
+      "targets": [
+        "jfclua_bench"
+      ]
+    },
     {
       "name": "linux-gcc",
       "configurePreset": "linux-gcc",

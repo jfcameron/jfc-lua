@@ -148,23 +148,24 @@ namespace {
                 "object:%s(...)", lua_tostring(pState, lua_upvalueindex(4)),
                 lua_tostring(pState, lua_upvalueindex(3)), lua_tostring(pState, lua_upvalueindex(4)));
 
-        auto *const pMethod = static_cast<jfc::lua::interpreter::untyped_method_type *>(
+        auto *const pMethod = static_cast<jfc::lua::detail::typed_method_type *>(
             lua_touserdata(pState, lua_upvalueindex(1)));
 
         std::size_t length = 0;
 
-        const char *const name = lua_tolstring(pState, lua_upvalueindex(5), &length);
+        const char *const text = lua_tolstring(pState, lua_upvalueindex(5), &length);
 
-        return jfc::lua::detail::bound_call(pState, 2, std::string_view(name, length), "a method",
-            [self, pMethod](jfc::lua::value_list_type aArguments) {
-                const jfc::lua::userdata object = *self;
+        const std::string_view name(text, length);
 
-                return (*pMethod)(object, std::move(aArguments));
-            });
+        return jfc::lua::detail::guarded_call(pState, name, [self, pMethod, pState, name] {
+            jfc::lua::detail::call_frame frame(pState, name, 1);
+
+            return (*pMethod)(*self, frame);
+        });
     }
 
     int _destroy_method(lua_State *pState) {
-        using method_type = jfc::lua::interpreter::untyped_method_type;
+        using method_type = jfc::lua::detail::typed_method_type;
 
         static_cast<method_type *>(lua_touserdata(pState, 1))->~method_type();
 
@@ -300,7 +301,7 @@ namespace jfc::lua::detail {
 
 namespace jfc::lua {
     void interpreter::_register_type(std::string aName, const void *const aTypeKey,
-        std::vector<std::pair<std::string, untyped_method_type>> aMethods) {
+        std::vector<std::pair<std::string, detail::typed_method_type>> aMethods) {
         auto *const L = m_pState.get();
 
         const stack_guard guard(L);
@@ -316,10 +317,10 @@ namespace jfc::lua {
             const int methods = lua_gettop(L);
 
             for (auto &[name, method] : aMethods) {
-                auto *const pStorage = static_cast<untyped_method_type *>(
-                    lua_newuserdata(L, sizeof(untyped_method_type)));
+                auto *const pStorage = static_cast<detail::typed_method_type *>(
+                    lua_newuserdata(L, sizeof(detail::typed_method_type)));
 
-                new (pStorage) untyped_method_type(std::move(method));
+                new (pStorage) detail::typed_method_type(std::move(method));
 
                 lua_newtable(L);
                 lua_pushcfunction(L, _destroy_method);

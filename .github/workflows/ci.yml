@@ -229,6 +229,58 @@ jobs:
                 -Iinclude -c alone.cpp -o /dev/null
           done
 
+  install:
+    name: install and consume (${{ matrix.preset }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [linux-gcc, linux-gcc-lua51]
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: build
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: install
+        run: cmake --install out/build/${{ matrix.preset }} --prefix "$PWD/out/installed"
+
+      - name: consume
+        run: |
+          cmake -S test/consume -B out/consume -DCMAKE_PREFIX_PATH="$PWD/out/installed"
+          cmake --build out/consume
+          out/consume/jfclua_consume
+
+  bench:
+    name: bench ${{ matrix.preset }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [linux-gcc-bench, linux-gcc-lua51-bench]
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: configure
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: build
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: run
+        run: out/build/${{ matrix.preset }}/bench/jfclua_bench
+
   docs:
     name: docs (doxygen)
     runs-on: ubuntu-latest

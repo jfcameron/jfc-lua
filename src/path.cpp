@@ -6,6 +6,8 @@
 #include <jfc/lua/key.h>
 #include <jfc/lua/path.h>
 
+#include <algorithm>
+#include <cstddef>
 #include <utility>
 #include <ostream>
 #include <sstream>
@@ -96,6 +98,9 @@ namespace {
         if (aPath.empty()) throw _malformed(aPath, "it is empty");
 
         std::vector<jfc::lua::key> segments;
+
+        segments.reserve(1 + static_cast<std::size_t>(std::count_if(aPath.begin(), aPath.end(),
+            [](const char aCharacter) { return aCharacter == '.' || aCharacter == '['; })));
 
         std::size_t i = 0;
 

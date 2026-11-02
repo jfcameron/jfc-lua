@@ -41,6 +41,12 @@ namespace jfc::lua {
         /// \brief what to do when a script reaches INSTRUCTION_BUDGET
         const std::function<bool(const std::size_t aInstructionsExecuted)>
             ON_INSTRUCTION_BUDGET_EXHAUSTED{};
+
+        /// \brief told of a lua error nothing was protecting against, after which lua ends the process
+        ///
+        /// Only a fault in this library should reach it, and there is no carrying on from it. With nothing here the
+        /// process ends without a word: the library writes to no stream of its own.
+        const std::function<void(const std::string_view aMessage)> ON_PANIC{};
     };
 
     /// \brief a lua interpreter
@@ -150,9 +156,6 @@ namespace jfc::lua {
         template <typename object_type>
         using method_type = std::function<value_list_type(object_type &, value_list_type)>;
 
-        //! a method that has not been told its object's type yet: given the object as a userdata
-        using untyped_method_type = std::function<value_list_type(const userdata &, value_list_type)>;
-
         /// \brief give object_type methods
         template <typename object_type>
         void register_type(
@@ -160,18 +163,30 @@ namespace jfc::lua {
             std::vector<std::pair<std::string, 
             method_type<object_type>>> aMethods
         ) {
-            std::vector<std::pair<std::string, untyped_method_type>> untyped;
+            std::vector<std::pair<std::string, detail::typed_method_type>> methods;
 
-            untyped.reserve(aMethods.size());
+            methods.reserve(aMethods.size());
 
-            for (auto &[name, method] : aMethods)
-                untyped.emplace_back(name,
-                    [method = std::move(method)](const userdata &aSelf, value_list_type aArguments) {
-                        return method(*aSelf.get<object_type>(), std::move(aArguments));
-                    });
+            for (auto &[name, function] : aMethods)
+                methods.emplace_back(name, detail::make_typed_method<object_type>(std::move(function)));
 
             _register_type(std::move(aName), userdata::make(std::shared_ptr<object_type>()).type_key(),
-                std::move(untyped));
+                std::move(methods));
+        }
+
+        /// \brief give object_type methods that say what they take in their own signatures
+        /// \see jfc::lua::method
+        template <typename object_type, typename... function_types>
+        void register_type(std::string aName, detail::named_method<function_types>... aMethods) {
+            std::vector<std::pair<std::string, detail::typed_method_type>> methods;
+
+            methods.reserve(sizeof...(function_types));
+
+            (methods.emplace_back(std::move(aMethods.name),
+                detail::make_typed_method<object_type>(std::move(aMethods.function))), ...);
+
+            _register_type(std::move(aName), userdata::make(std::shared_ptr<object_type>()).type_key(),
+                std::move(methods));
         }
 
         /// \brief hold a reference to a userdata directly in order to prevent it from going out of scope
@@ -197,7 +212,7 @@ namespace jfc::lua {
         void _set_up(lua_State *L);
 
         void _register_type(std::string aName, const void *aTypeKey,
-            std::vector<std::pair<std::string, untyped_method_type>> aMethods);
+            std::vector<std::pair<std::string, detail::typed_method_type>> aMethods);
 
        [[nodiscard]] std::optional<userdata> _read_userdata(const path &aPath) const;
 

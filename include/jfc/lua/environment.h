@@ -72,12 +72,12 @@ namespace jfc::lua
         /// Its arguments are read from the script as it asks, and a call that does not fit is an error naming the
         /// function and the argument. A whole number must fit the integer type asked for. A std::optional may be left
         /// out or nil. No more arguments may be given than it takes. A std::string_view or a table_view is valid for the
-        /// call, and a function_reference or a reference can be kept. Results may be a std::tuple for several, and a
-        /// std::optional is nil when empty.
+        /// call, and a function_reference or a reference can be kept. A trailing value_list_type takes every argument
+        /// left. Results may be a std::tuple for several, and a std::optional is nil when empty.
         template <typename function_type>
         requires (!std::is_convertible_v<function_type, closure_type>)
         void register_function(const path &aName, function_type &&aFunction)
-            { _register_typed(aName, detail::make_typed_closure(std::forward<function_type>(aFunction)), false); }
+            { _register(aName, detail::make_typed_closure(std::forward<function_type>(aFunction)), false); }
 
         /// \brief registers a closure that suspends the coroutine calling it
         void register_yielding_function(const path &aName, closure_type aClosure);
@@ -86,7 +86,7 @@ namespace jfc::lua
         template <typename function_type>
         requires (!std::is_convertible_v<function_type, closure_type>)
         void register_yielding_function(const path &aName, function_type &&aFunction)
-            { _register_typed(aName, detail::make_typed_closure(std::forward<function_type>(aFunction)), true); }
+            { _register(aName, detail::make_typed_closure(std::forward<function_type>(aFunction)), true); }
 
         /// \brief the function at aFunction, ready to run as a coroutine against this environment
         [[nodiscard]] std::optional<coroutine> make_coroutine(const path &aFunction);
@@ -111,10 +111,7 @@ namespace jfc::lua
             const std::optional<std::size_t> aInstructionBudget);
 
         //! registers aClosure at aName, yielding its results if aYields. \see register_function
-        void _register(const path &aName, closure_type aClosure, bool aYields);
-
-        //! the same for a typed function
-        void _register_typed(const path &aName, detail::typed_closure_type aClosure, bool aYields);
+        void _register(const path &aName, detail::typed_closure_type aClosure, bool aYields);
 
         std::optional<std::size_t> m_InstructionBudget;
     };
