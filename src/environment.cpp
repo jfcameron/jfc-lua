@@ -374,11 +374,13 @@ namespace jfc::lua {
     void reference::write(const path &aPath, const std::vector<std::string> &aValue) { _write_as_array(*this, aPath, aValue); }
 
     namespace {
-        [[nodiscard]] error_type _invoke(lua_State *const L, const std::string &aWhat,
+        /// \param aWhat makes the name an error calls this by, which is too slow to make for a call that works
+        template <typename what_type>
+        [[nodiscard]] error_type _invoke(lua_State *const L, const what_type &aWhat,
             const value_list_type &aArguments, value_list_type &aResults)
         {
             if (lua_type(L, -1) != LUA_TFUNCTION)
-                return aWhat + " holds a " + lua_typename(L, lua_type(L, -1)) + ", not a function";
+                return aWhat() + " holds a " + lua_typename(L, lua_type(L, -1)) + ", not a function";
 
             if (!lua_checkstack(L, static_cast<int>(aArguments.size()) + 2))
                 return "the lua stack cannot grow enough to make this call";
@@ -394,7 +396,7 @@ namespace jfc::lua {
                 const auto unconverted = [&](const std::string &aWhy) -> error_type {
                     aResults.clear();
 
-                    return aWhat + " returned a " + lua_typename(L, lua_type(L, i))
+                    return aWhat() + " returned a " + lua_typename(L, lua_type(L, i))
                         + " in position " + std::to_string(i - base + 1) + aWhy;
                 };
 
@@ -407,8 +409,8 @@ namespace jfc::lua {
             return {};
         }
 
-        template <typename find_type>
-        [[nodiscard]] error_type _protected_invoke(lua_State *const L, const std::string &aWhat,
+        template <typename what_type, typename find_type>
+        [[nodiscard]] error_type _protected_invoke(lua_State *const L, const what_type &aWhat,
             const value_list_type &aArguments, value_list_type &aResults, find_type &&aFind) {
             error_type error;
 
@@ -437,14 +439,16 @@ namespace jfc::lua {
 
         aResults.clear();
 
-        std::stringstream where;
+        const auto what = [&aPath] {
+            std::ostringstream where;
 
-        where << aPath;
+            where << aPath;
 
-        const auto what = where.str();
+            return where.str();
+        };
 
         return _protected_invoke(L, what, aArguments, aResults, [&]() -> error_type {
-            if (!_read_value(L, registry_reference(), aPath)) return what + " does not resolve";
+            if (!_read_value(L, registry_reference(), aPath)) return what() + " does not resolve";
 
             return {};
         });
@@ -465,7 +469,9 @@ namespace jfc::lua {
 
         aResults.clear();
 
-        return _protected_invoke(L, "the reference", aArguments, aResults, [&]() -> error_type {
+        const auto what = [] { return std::string("the reference"); };
+
+        return _protected_invoke(L, what, aArguments, aResults, [&]() -> error_type {
             lua_rawgeti(L, LUA_REGISTRYINDEX, registry_reference());
 
             return {};
@@ -529,35 +535,21 @@ namespace jfc::lua {
 
     namespace {
         struct registered_closure final {
-            environment::closure_type closure;
-            std::string name;
-        };
-
-        struct registered_typed_closure final {
             detail::typed_closure_type closure;
             std::string name;
-            std::optional<std::size_t> instructionBudget;
         };
 
         int _closure_trampoline(lua_State *pState) {
             auto *const pImpl = static_cast<registered_closure *>(lua_touserdata(pState, lua_upvalueindex(1)));
 
-            return detail::bound_call(pState, 1, pImpl->name, "a registered function",
-                [pImpl](value_list_type aArguments) { return pImpl->closure(std::move(aArguments)); });
-        }
-
-        int _typed_closure_trampoline(lua_State *pState) {
-            auto *const pImpl = static_cast<registered_typed_closure *>(lua_touserdata(pState, lua_upvalueindex(1)));
-
             return detail::guarded_call(pState, pImpl->name, [pImpl, pState] {
-                detail::call_frame frame(pState, pImpl->name, pImpl->instructionBudget);
+                detail::call_frame frame(pState, pImpl->name, 0);
 
                 return pImpl->closure(frame);
             });
         }
 
-        template <lua_CFunction call>
-        int _yielding_trampoline(lua_State *pState) {
+        int _yielding_closure_trampoline(lua_State *pState) {
             const bool mainThread = lua_pushthread(pState) == 1;
 
             lua_pop(pState, 1);
@@ -565,21 +557,38 @@ namespace jfc::lua {
             if (mainThread) return luaL_error(pState, "%s", "this function waits, and only a "
                 "coroutine can wait: call it from one, not from a plain call or run");
 
-            return lua_yield(pState, call(pState));
+            return lua_yield(pState, _closure_trampoline(pState));
         }
+    }
 
-        /// \brief pushes a c function that keeps a held_type made of aFields, in a userdata whose metatable aMetatable
-        /// names. It is made only once the userdata exists, since making that can raise.
-        template <typename held_type, typename... field_types>
-        void _push_closure(lua_State *const L, const char *const aMetatable, const lua_CFunction aTrampoline,
-            const field_types &...aFields) {
-            auto *const pStorage = static_cast<held_type *>(lua_newuserdata(L, sizeof(held_type)));
+    void environment::register_function(const path &aName, closure_type aClosure)
+        { _register(aName, detail::make_typed_closure(std::move(aClosure)), false); }
 
-            new (pStorage) held_type{aFields...};
+    void environment::register_yielding_function(const path &aName, closure_type aClosure)
+        { _register(aName, detail::make_typed_closure(std::move(aClosure)), true); }
 
-            if (luaL_newmetatable(L, aMetatable)) {
+    void environment::_register(const path &aName, detail::typed_closure_type aClosure, const bool aYields) {
+        auto *L = state();
+
+        const stack_guard guard(L);
+        const root_scope root(L, registry_reference());
+
+        const auto trampoline = aYields ? _yielding_closure_trampoline : _closure_trampoline;
+
+        std::ostringstream where;
+
+        where << aName;
+
+        const auto name = where.str();
+
+        _protected_write(L, registry_reference(), aName, [&]() {
+            auto *const pStorage = static_cast<registered_closure *>(lua_newuserdata(L, sizeof(registered_closure)));
+
+            new (pStorage) registered_closure{aClosure, name};
+
+            if (luaL_newmetatable(L, "jfc.lua.closure")) {
                 lua_pushcfunction(L, [](lua_State *pState) {
-                    static_cast<held_type *>(lua_touserdata(pState, 1))->~held_type();
+                    static_cast<registered_closure *>(lua_touserdata(pState, 1))->~registered_closure();
                     return 0;
                 });
 
@@ -588,52 +597,7 @@ namespace jfc::lua {
 
             lua_setmetatable(L, -2);
 
-            lua_pushcclosure(L, aTrampoline, 1);
-        }
-    }
-
-    void environment::register_function(const path &aName, closure_type aClosure)
-        { _register(aName, std::move(aClosure), false); }
-
-    void environment::register_yielding_function(const path &aName, closure_type aClosure)
-        { _register(aName, std::move(aClosure), true); }
-
-    void environment::_register(const path &aName, closure_type aClosure, const bool aYields) {
-        auto *L = state();
-
-        const stack_guard guard(L);
-        const root_scope root(L, registry_reference());
-
-        const auto trampoline = aYields ? _yielding_trampoline<_closure_trampoline> : _closure_trampoline;
-
-        std::ostringstream where;
-
-        where << aName;
-
-        const auto name = where.str();
-
-        _protected_write(L, registry_reference(), aName, [&]() {
-            _push_closure<registered_closure>(L, "jfc.lua.closure", trampoline, aClosure, name);
-        });
-    }
-
-    void environment::_register_typed(const path &aName, detail::typed_closure_type aClosure, const bool aYields) {
-        auto *L = state();
-
-        const stack_guard guard(L);
-        const root_scope root(L, registry_reference());
-
-        const auto trampoline = aYields ? _yielding_trampoline<_typed_closure_trampoline> : _typed_closure_trampoline;
-
-        std::ostringstream where;
-
-        where << aName;
-
-        const auto name = where.str();
-
-        _protected_write(L, registry_reference(), aName, [&]() {
-            _push_closure<registered_typed_closure>(L, "jfc.lua.typed_closure", trampoline, aClosure, name,
-                m_InstructionBudget);
+            lua_pushcclosure(L, trampoline, 1);
         });
     }
 

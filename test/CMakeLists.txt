@@ -26,6 +26,7 @@ jfc_add_tests(
         "${CMAKE_CURRENT_LIST_DIR}/stack_balance_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/table_view_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/typed_function_test.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/typed_method_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/userdata_crossing_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/userdata_methods_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/userdata_test.cpp"

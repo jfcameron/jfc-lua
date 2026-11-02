@@ -9,6 +9,7 @@ project(jfclua
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/jfc-cmake/jfclib.cmake")
 
 option(JFCLUA_BUILD_DEMO "Build the demo" OFF)
+option(JFCLUA_BUILD_BENCH "Build the benchmark harness" OFF)
 option(JFCLUA_BUILD_DOCS "Build documentation" OFF)
 option(JFCLUA_BUILD_TESTS "Build unit tests" ${PROJECT_IS_TOP_LEVEL})
 
@@ -117,8 +118,44 @@ if (NOT TARGET jfclua)
 
 endif()
 
+if (PROJECT_IS_TOP_LEVEL)
+    include(GNUInstallDirs)
+    include(CMakePackageConfigHelpers)
+
+    install(TARGETS jfclua ${JFC_LUA_TARGET}
+        EXPORT jfclua-targets
+        ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/"
+        DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+        FILES_MATCHING PATTERN "*.h")
+
+    install(EXPORT jfclua-targets
+        FILE jfclua-targets.cmake
+        NAMESPACE jfc::
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/jfclua")
+
+    write_basic_package_version_file(
+        "${PROJECT_BINARY_DIR}/jfclua-config-version.cmake"
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion)
+
+    file(WRITE "${PROJECT_BINARY_DIR}/jfclua-config.cmake"
+"include(\"\${CMAKE_CURRENT_LIST_DIR}/jfclua-targets.cmake\")
+")
+
+    install(FILES
+        "${PROJECT_BINARY_DIR}/jfclua-config.cmake"
+        "${PROJECT_BINARY_DIR}/jfclua-config-version.cmake"
+        DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/jfclua")
+endif()
+
 if (JFCLUA_BUILD_DEMO)
     add_subdirectory(demo)
+endif()
+
+if (JFCLUA_BUILD_BENCH)
+    add_subdirectory(bench)
 endif()
 
 if (JFCLUA_BUILD_TESTS)

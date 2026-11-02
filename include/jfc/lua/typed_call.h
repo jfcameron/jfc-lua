@@ -28,7 +28,8 @@ namespace jfc::lua::detail
     class call_frame final
     {
     public:
-        call_frame(lua_State *L, std::string_view aName, std::optional<std::size_t> aInstructionBudget);
+        //! aFirstArgument is how many values on the stack come before the script's first argument
+        call_frame(lua_State *L, std::string_view aName, int aFirstArgument);
 
         //! refuses a call given more than aCount arguments
         void expect_at_most(int aCount) const;
@@ -47,6 +48,9 @@ namespace jfc::lua::detail
         [[nodiscard]] std::string_view text(int aIndex) const;
 
         [[nodiscard]] data_table table(int aIndex) const;
+
+        //! every argument from aIndex on
+        [[nodiscard]] value_list_type arguments(int aIndex) const;
 
         //! the table in place
         [[nodiscard]] table_view view(int aIndex) const;
@@ -82,13 +86,16 @@ namespace jfc::lua::detail
     private:
         lua_State *m_pState;
         std::string_view m_Name;
-        std::optional<std::size_t> m_InstructionBudget;
+        int m_FirstArgument;
 
         [[noreturn]] void _refuse(int aIndex, const std::string &aWanted) const;
     };
 
     /// \brief what a registered typed function becomes: reads, calls, pushes, and returns how many results it pushed
     using typed_closure_type = std::function<int(call_frame &)>;
+
+    /// \brief what a registered method becomes: the same, given the object it was called on
+    using typed_method_type = std::function<int(const userdata &, call_frame &)>;
 
     template <typename> inline constexpr bool always_false = false;
 
@@ -113,6 +120,7 @@ namespace jfc::lua::detail
         else if constexpr (std::is_same_v<value_type, std::string_view>) return aFrame.text(aIndex);
         else if constexpr (std::is_same_v<value_type, std::string>) return std::string(aFrame.text(aIndex));
         else if constexpr (std::is_same_v<value_type, data_table>) return aFrame.table(aIndex);
+        else if constexpr (std::is_same_v<value_type, value_list_type>) return aFrame.arguments(aIndex);
         else if constexpr (std::is_same_v<value_type, table_view>) return aFrame.view(aIndex);
         else if constexpr (std::is_same_v<value_type, reference>) return aFrame.value(aIndex);
         else if constexpr (std::is_same_v<value_type, function_reference>) return aFrame.function(aIndex);
@@ -129,7 +137,7 @@ namespace jfc::lua::detail
         }
         else static_assert(always_false<value_type>, "a typed function's arguments can be numbers, bool, std::string, "
             "std::string_view, data_table, table_view, userdata, std::shared_ptr to a bound type, reference, "
-            "function_reference, or std::optional of those");
+            "function_reference, std::optional of those, or a value_list_type for every argument left");
     }
 
     /// \return how many values were pushed
@@ -176,57 +184,124 @@ namespace jfc::lua::detail
         }
     }
 
-    template <typename> struct typed_signature;
-
+    /// \brief reads argument_types from the script, calls with them, and pushes what comes back
     template <typename result_type, typename... argument_types>
-    struct typed_signature<std::function<result_type(argument_types...)>> final {
+    struct typed_call {
         static_assert(((!std::is_lvalue_reference_v<argument_types>
             || std::is_const_v<std::remove_reference_t<argument_types>>) && ...),
             "a typed function's arguments come from the script, so a non-const reference has nothing to refer to");
 
-        template <typename function_type>
-        [[nodiscard]] static int call(function_type &aFunction, call_frame &aFrame) {
-            return call(aFunction, aFrame, std::index_sequence_for<argument_types...>{});
-        }
-
     private:
-        template <typename function_type, std::size_t... indices>
-        [[nodiscard]] static int call(function_type &aFunction, call_frame &aFrame, std::index_sequence<indices...>) {
-            aFrame.expect_at_most(static_cast<int>(sizeof...(argument_types)));
+        static constexpr std::size_t COUNT = sizeof...(argument_types);
+
+        static constexpr std::size_t VALUE_LISTS
+            = (std::size_t{0} + ... + std::is_same_v<std::remove_cvref_t<argument_types>, value_list_type>);
+
+        //! a value list takes what is left, which leaves nothing to refuse
+        static constexpr bool TAKES_THE_REST = VALUE_LISTS == 1 && std::is_same_v<std::remove_cvref_t<
+            std::tuple_element_t<(COUNT > 0 ? COUNT - 1 : 0), std::tuple<argument_types..., void>>>, value_list_type>;
+
+        static_assert(VALUE_LISTS == 0 || TAKES_THE_REST, "a value_list_type takes every argument left, so it comes last");
+
+        template <typename call_type, std::size_t... indices>
+        [[nodiscard]] static int run(call_type &&aCall, call_frame &aFrame, std::index_sequence<indices...>) {
+            if constexpr (!TAKES_THE_REST) aFrame.expect_at_most(static_cast<int>(COUNT));
 
             // braces, so that arguments are read left to right and the first wrong one is the one reported
             std::tuple<std::remove_cvref_t<argument_types>...> held{
                 read_argument<std::remove_cvref_t<argument_types>>(aFrame, static_cast<int>(indices) + 1)...};
 
-            const auto run = [&]() -> decltype(auto) {
-                try { return std::apply(aFunction, std::move(held)); }
+            const auto guarded = [&]() -> decltype(auto) {
+                try { return std::apply(aCall, std::move(held)); }
                 catch (const std::exception &) { throw; }
                 catch (...) { aFrame.throw_unknown(); }
             };
 
             if constexpr (std::is_void_v<result_type>) {
-                run();
+                guarded();
 
                 return 0;
             }
-            else return push_result<std::decay_t<result_type>>(aFrame, run());
+            else return push_result<std::decay_t<result_type>>(aFrame, guarded());
         }
+
+    public:
+        template <typename call_type>
+        [[nodiscard]] static int call(call_type &&aCall, call_frame &aFrame) {
+            return run(std::forward<call_type>(aCall), aFrame, std::index_sequence_for<argument_types...>{});
+        }
+    };
+
+    template <typename> struct typed_signature;
+
+    template <typename result_type, typename... argument_types>
+    struct typed_signature<std::function<result_type(argument_types...)>> final {
+        using call_type = typed_call<result_type, argument_types...>;
+    };
+
+    template <typename object_type, typename> struct typed_method_signature;
+
+    template <typename object_type, typename result_type, typename self_type, typename... argument_types>
+    struct typed_method_signature<object_type, std::function<result_type(self_type, argument_types...)>> final {
+        static_assert(std::is_reference_v<self_type> && std::is_same_v<std::remove_cvref_t<self_type>, object_type>,
+            "a typed method's first parameter is a reference to the object it is called on");
+
+        using call_type = typed_call<result_type, argument_types...>;
     };
 
     template <typename function_type>
     concept has_one_signature = requires (std::decay_t<function_type> &aFunction) { std::function{aFunction}; };
 
     template <typename function_type>
+    using signature_of = decltype(std::function{std::declval<std::decay_t<function_type> &>()});
+
+    template <typename function_type>
     [[nodiscard]] typed_closure_type make_typed_closure(function_type &&aFunction) {
         if constexpr (has_one_signature<function_type>) {
-            using held_type = std::decay_t<function_type>;
-            using signature_type = typed_signature<decltype(std::function{std::declval<held_type &>()})>;
+            using call_type = typename typed_signature<signature_of<function_type>>::call_type;
 
-            return [function = held_type(std::forward<function_type>(aFunction))](call_frame &aFrame) mutable
-                { return signature_type::call(function, aFrame); };
+            return [function = std::decay_t<function_type>(std::forward<function_type>(aFunction))](
+                call_frame &aFrame) mutable { return call_type::call(function, aFrame); };
         }
         else static_assert(always_false<function_type>, "a typed function's signature says what to read from the script, "
             "so it cannot be a generic lambda or an overloaded function object");
+    }
+
+    template <typename object_type, typename function_type>
+    [[nodiscard]] typed_method_type make_typed_method(function_type &&aFunction) {
+        if constexpr (has_one_signature<function_type>) {
+            using call_type = typename typed_method_signature<object_type, signature_of<function_type>>::call_type;
+
+            return [function = std::decay_t<function_type>(std::forward<function_type>(aFunction))](
+                const userdata &aSelf, call_frame &aFrame) mutable {
+                    const auto object = aSelf.get<object_type>();
+
+                    return call_type::call([&](auto &&...aArguments) -> decltype(auto) {
+                        return function(*object, std::forward<decltype(aArguments)>(aArguments)...);
+                    }, aFrame);
+                };
+        }
+        else static_assert(always_false<function_type>, "a typed method's signature says what to read from the script, "
+            "so it cannot be a generic lambda or an overloaded function object");
+    }
+
+    /// \see jfc::lua::method
+    template <typename function_type>
+    struct named_method final {
+        std::string name;
+        function_type function;
+    };
+}
+
+namespace jfc::lua
+{
+    /// \brief a method for interpreter::register_type, which says what it takes in its own signature
+    ///
+    /// Its first parameter is a reference to the object. What follows reads as a typed function's arguments do, numbered
+    /// from the first after the object. \see environment::register_function
+    template <typename function_type>
+    [[nodiscard]] detail::named_method<std::decay_t<function_type>> method(std::string aName, function_type &&aFunction) {
+        return {std::move(aName), std::forward<function_type>(aFunction)};
     }
 }
 

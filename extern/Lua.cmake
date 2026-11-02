@@ -1,14 +1,19 @@
 # © Joseph Cameron - MIT License
 
 if (JFC_LUA_BACKEND STREQUAL "luajit")
-    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/LuaJIT")
+    # excluded so that installing this library does not install LuaJIT's executable and headers too
+    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/LuaJIT" EXCLUDE_FROM_ALL)
 
-    target_include_directories(libluajit PUBLIC
-        "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/LuaJIT/src>"
-        "$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/LuaJIT/src>")
+    # replaced rather than added to: LuaJIT's own are plain paths, which an installed target cannot export
+    set_target_properties(libluajit PROPERTIES INTERFACE_INCLUDE_DIRECTORIES
+        "$<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/LuaJIT/src>;$<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}/LuaJIT/src>")
 
-    set_property(TARGET libluajit APPEND PROPERTY
-        INTERFACE_LINK_LIBRARIES ${CMAKE_DL_LIBS})
+    # replaced rather than added to: find_library's whole paths would tie an installed package to this machine
+    if (UNIX)
+        set_target_properties(libluajit PROPERTIES INTERFACE_LINK_LIBRARIES "m;${CMAKE_DL_LIBS}")
+    else()
+        set_property(TARGET libluajit APPEND PROPERTY INTERFACE_LINK_LIBRARIES ${CMAKE_DL_LIBS})
+    endif()
 
     set(JFC_LUA_TARGET "libluajit" CACHE INTERNAL "the cmake target the lua backend builds")
 

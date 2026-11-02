@@ -25,12 +25,12 @@ namespace jfc::lua::detail {
             return std::string("a ") + lua_typename(L, type);
         }
 
-        [[nodiscard]] std::shared_ptr<lua_State> _shared_state(lua_State *const L) {
+        [[nodiscard]] const interpreter_limits *_limits(lua_State *const L) {
             void *ud = nullptr;
 
             lua_getallocf(L, &ud);
 
-            return static_cast<interpreter_limits *>(ud)->state.lock();
+            return static_cast<const interpreter_limits *>(ud);
         }
 
         [[nodiscard]] int _anchor(lua_State *const L, const int aIndex) {
@@ -42,20 +42,19 @@ namespace jfc::lua::detail {
         }
     }
 
-    call_frame::call_frame(lua_State *const L, const std::string_view aName,
-        const std::optional<std::size_t> aInstructionBudget)
+    call_frame::call_frame(lua_State *const L, const std::string_view aName, const int aFirstArgument)
     : m_pState(L)
     , m_Name(aName)
-    , m_InstructionBudget(aInstructionBudget)
+    , m_FirstArgument(aFirstArgument)
     {}
 
     void call_frame::_refuse(const int aIndex, const std::string &aWanted) const {
         throw exception(std::string(m_Name) + ": argument " + std::to_string(aIndex) + " wants " + aWanted + ", got "
-            + _describe(m_pState, aIndex));
+            + _describe(m_pState, aIndex + m_FirstArgument));
     }
 
     void call_frame::expect_at_most(const int aCount) const {
-        const int given = lua_gettop(m_pState);
+        const int given = lua_gettop(m_pState) - m_FirstArgument;
 
         if (given <= aCount) return;
 
@@ -65,18 +64,22 @@ namespace jfc::lua::detail {
         throw exception(std::string(m_Name) + " takes " + takes + ", got " + std::to_string(given));
     }
 
-    bool call_frame::absent(const int aIndex) const { return lua_isnoneornil(m_pState, aIndex); }
+    bool call_frame::absent(const int aIndex) const { return lua_isnoneornil(m_pState, aIndex + m_FirstArgument); }
 
     double call_frame::number(const int aIndex) const {
-        if (lua_type(m_pState, aIndex) != LUA_TNUMBER) _refuse(aIndex, "a number");
+        const int index = aIndex + m_FirstArgument;
 
-        return lua_tonumber(m_pState, aIndex);
+        if (lua_type(m_pState, index) != LUA_TNUMBER) _refuse(aIndex, "a number");
+
+        return lua_tonumber(m_pState, index);
     }
 
     double call_frame::whole(const int aIndex, const int aDigits, const bool aSigned) const {
-        if (lua_type(m_pState, aIndex) != LUA_TNUMBER) _refuse(aIndex, "a whole number");
+        const int index = aIndex + m_FirstArgument;
 
-        const double value = lua_tonumber(m_pState, aIndex);
+        if (lua_type(m_pState, index) != LUA_TNUMBER) _refuse(aIndex, "a whole number");
+
+        const double value = lua_tonumber(m_pState, index);
         const double limit = std::ldexp(1.0, aDigits);
 
         if (value == std::floor(value) && value < limit && value >= (aSigned ? -limit : 0.0)) return value;
@@ -94,47 +97,79 @@ namespace jfc::lua::detail {
     }
 
     bool call_frame::boolean(const int aIndex) const {
-        if (!lua_isboolean(m_pState, aIndex)) _refuse(aIndex, "a boolean");
+        const int index = aIndex + m_FirstArgument;
 
-        return lua_toboolean(m_pState, aIndex);
+        if (!lua_isboolean(m_pState, index)) _refuse(aIndex, "a boolean");
+
+        return lua_toboolean(m_pState, index);
     }
 
     std::string_view call_frame::text(const int aIndex) const {
-        if (lua_type(m_pState, aIndex) != LUA_TSTRING) _refuse(aIndex, "a string");
+        const int index = aIndex + m_FirstArgument;
+
+        if (lua_type(m_pState, index) != LUA_TSTRING) _refuse(aIndex, "a string");
 
         std::size_t length = 0;
 
-        const char *const text = lua_tolstring(m_pState, aIndex, &length);
+        const char *const text = lua_tolstring(m_pState, index, &length);
 
         return {text, length};
     }
 
     data_table call_frame::table(const int aIndex) const {
-        if (!lua_istable(m_pState, aIndex)) _refuse(aIndex, "a table");
+        const int index = aIndex + m_FirstArgument;
 
-        return data_table(m_pState, aIndex);
+        if (!lua_istable(m_pState, index)) _refuse(aIndex, "a table");
+
+        return data_table(m_pState, index);
+    }
+
+    value_list_type call_frame::arguments(const int aIndex) const {
+        const int first = aIndex + m_FirstArgument;
+        const int last = lua_gettop(m_pState);
+
+        value_list_type out;
+
+        if (last >= first) out.reserve(static_cast<std::size_t>(last - first + 1));
+
+        for (int i = first; i <= last; ++i) {
+            if (to_param(m_pState, i, out)) continue;
+
+            throw exception("argument " + std::to_string(i - m_FirstArgument) + " is a "
+                + lua_typename(m_pState, lua_type(m_pState, i)) + ", which cannot cross into c++");
+        }
+
+        return out;
     }
 
     table_view call_frame::view(const int aIndex) const {
-        if (!lua_istable(m_pState, aIndex)) _refuse(aIndex, "a table");
+        const int index = aIndex + m_FirstArgument;
 
-        return table_view(m_pState, aIndex, false);
+        if (!lua_istable(m_pState, index)) _refuse(aIndex, "a table");
+
+        return table_view(m_pState, index, false);
     }
 
     reference call_frame::value(const int aIndex) const {
-        if (lua_isnoneornil(m_pState, aIndex)) _refuse(aIndex, "a value");
+        const int index = aIndex + m_FirstArgument;
 
-        return reference(_shared_state(m_pState), _anchor(m_pState, aIndex));
+        if (lua_isnoneornil(m_pState, index)) _refuse(aIndex, "a value");
+
+        return reference(_limits(m_pState)->state.lock(), _anchor(m_pState, index));
     }
 
     function_reference call_frame::function(const int aIndex) const {
-        if (!lua_isfunction(m_pState, aIndex)) _refuse(aIndex, "a function");
+        const int index = aIndex + m_FirstArgument;
 
-        return function_reference(_shared_state(m_pState), _anchor(m_pState, aIndex), m_InstructionBudget);
+        if (!lua_isfunction(m_pState, index)) _refuse(aIndex, "a function");
+
+        const auto *const pLimits = _limits(m_pState);
+
+        return function_reference(pLimits->state.lock(), _anchor(m_pState, index), pLimits->instructionBudget);
     }
 
     userdata call_frame::object(const int aIndex) const {
-        const auto *const pObject = to_userdata(m_pState, aIndex);
+        const auto *const pObject = to_userdata(m_pState, aIndex + m_FirstArgument);
 
         if (!pObject || pObject->empty()) _refuse(aIndex, "an object");
 
@@ -142,7 +177,7 @@ namespace jfc::lua::detail {
     }
 
     userdata call_frame::object(const int aIndex, const void *const aTypeKey) const {
-        const auto *const pObject = to_userdata(m_pState, aIndex);
+        const auto *const pObject = to_userdata(m_pState, aIndex + m_FirstArgument);
 
         if (!pObject || pObject->empty() || pObject->type_key() != aTypeKey) {
             const auto name = type_name(m_pState, aTypeKey);
@@ -171,7 +206,7 @@ namespace jfc::lua::detail {
     void call_frame::push(const userdata &aValue) { push_userdata(m_pState, aValue); }
 
     void call_frame::push(const reference &aValue) {
-        if (aValue.m_pState != _shared_state(m_pState))
+        if (aValue.m_pState != _limits(m_pState)->state.lock())
             throw exception(std::string(m_Name) + " returned a value that belongs to another interpreter");
 
         lua_rawgeti(m_pState, LUA_REGISTRYINDEX, aValue.registry_reference());

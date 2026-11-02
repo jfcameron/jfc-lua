@@ -211,7 +211,7 @@ TEST_CASE("**a method that throws something that is not a std::exception says it
     const auto error = env->run("object:throws()");
 
     REQUIRE(error);
-    REQUIRE(error->find("a method threw something that is not a std::exception") != std::string::npos);
+    REQUIRE(error->find("plain:throws threw something that is not a std::exception") != std::string::npos);
 }
 
 TEST_CASE("**a script can set fields on a registered object, as on a table**",

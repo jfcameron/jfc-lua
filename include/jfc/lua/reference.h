@@ -148,7 +148,7 @@ namespace jfc::lua
 
     /// \brief a function a script gave a typed function, to call now or to keep
     ///
-    /// It runs in the environment it was made in, under the instruction budget of the environment it was given to.
+    /// It runs in the environment it was made in, under the instruction budget of the script that gave it.
     ///
     /// \warning it keeps the interpreter's state alive, so keeping one inside something lua owns, such as a registered
     /// closure's captures, keeps both for good
