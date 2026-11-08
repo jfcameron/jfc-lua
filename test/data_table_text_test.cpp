@@ -217,6 +217,79 @@ TEST_CASE("a decimal escape is padded, so a digit after it stays a digit", "[tex
     REQUIRE(env->read_number("n") == 4);
 }
 
+TEST_CASE("an indented table is a field a line, each level further in", "[text][indent]") {
+    data_table where;
+
+    where.set("x", 1.0);
+    where.set("y", 2.5);
+
+    data_table t;
+
+    t.set(1, true);
+    t.set("empty", data_table());
+    t.set("name", "bob");
+    t.set("odd key", "v");
+    t.set("where", where);
+
+    REQUIRE(t.to_string(4) == "{\n"
+        "    [1] = true,\n"
+        "    empty = {},\n"
+        "    name = \"bob\",\n"
+        "    [\"odd key\"] = \"v\",\n"
+        "    where = {\n"
+        "        x = 1,\n"
+        "        y = 2.5,\n"
+        "    },\n"
+        "}");
+
+    SECTION("by as many spaces as it is asked for") {
+        REQUIRE(where.to_string(2) == "{\n  x = 1,\n  y = 2.5,\n}");
+    }
+
+    SECTION("an empty table is still {}") {
+        REQUIRE(data_table().to_string(4) == "{}");
+    }
+
+    SECTION("and no indent is the one line it always was") {
+        REQUIRE(t.to_string(0) == t.to_string());
+        REQUIRE(t.to_string() == "{[1]=true,empty={},name=\"bob\",[\"odd key\"]=\"v\",where={x=1,y=2.5}}");
+    }
+}
+
+TEST_CASE("indented text reads back as the table it was written from", "[text][indent]") {
+    data_table inner;
+
+    inner.set("third", 1.0 / 3.0);
+    inner.set("tenth", 0.1);
+    inner.set(1, "first");
+    inner.set(false, "no");
+
+    data_table original;
+
+    original.set("name", "line one\nline \"two\"\x01" "5");
+    original.set("end", "a reserved word");
+    original.set("negative", -3.0);
+    original.set("inner", inner);
+    original.set(true, inner);
+
+    const auto written = original.to_string(4);
+
+    INFO(written);
+
+    REQUIRE(data_table::from_string(written).to_string() == original.to_string());
+
+    interpreter interp;
+
+    auto env = interp.make_environment();
+
+    REQUIRE_FALSE(env->run("restored = " + written).has_value());
+
+    const auto viaLua = env->read_data_table("restored");
+
+    REQUIRE(viaLua.has_value());
+    REQUIRE(viaLua->to_string() == original.to_string());
+}
+
 TEST_CASE("what to_string writes is still valid lua", "[text]") {
     interpreter interp;
 
@@ -228,6 +301,7 @@ TEST_CASE("what to_string writes is still valid lua", "[text]") {
     original.set("odd key, with punctuation", "and \"quotes\"");
     original.set("end", "a reserved word, so not a bare key");
     original.set("function", "nor this one");
+    original.set("goto", "reserved by luajit and lua 5.2, so nor this");
     original.set(1, "first");
     original.set(true, "flagged");
 

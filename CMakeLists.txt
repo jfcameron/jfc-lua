@@ -86,6 +86,7 @@ if (NOT TARGET jfclua)
         ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/path.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/reference.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/table_reader.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/table_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/typed_call.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/userdata_box.cpp

@@ -5,7 +5,9 @@
 #include <jfc/lua.h>
 
 #include <algorithm>
+#include <memory>
 #include <string>
+#include <variant>
 #include <vector>
 
 using namespace jfc::lua;
@@ -293,4 +295,44 @@ TEST_CASE("a subtable is copied into its parent, not shared with the caller", "[
     inner.set("hp", 1.0);
 
     REQUIRE(outer.get_data_table("stats")->get_number("hp") == 100);
+}
+
+TEST_CASE("a value of any type can be got and set again", "[table][access]") {
+    data_table stats;
+
+    stats.set("strength", 18.0);
+
+    data_table from;
+
+    from.set("hp", 42.0);
+    from.set("alive", true);
+    from.set("name", "jim");
+    from.set("stats", stats);
+
+    SECTION("get gives it as the type it is") {
+        REQUIRE(std::get<double>(*from.get("hp")) == 42);
+        REQUIRE(std::get<bool>(*from.get("alive")));
+        REQUIRE(std::get<std::string>(*from.get("name")) == "jim");
+        REQUIRE(std::get<std::shared_ptr<const data_table>>(*from.get("stats"))->get_number("strength") == 18);
+    }
+
+    SECTION("and nothing where there is no such key") {
+        REQUIRE_FALSE(from.get("mana").has_value());
+    }
+
+    SECTION("set puts it back as get gave it, at any key") {
+        data_table into;
+
+        for (const std::string name : {"hp", "alive", "name", "stats", "mana"})
+            if (const auto value = from.get(name)) into.set("copied_" + name, *value);
+
+        REQUIRE(into.to_string() == "{copied_alive=true,copied_hp=42,copied_name=\"jim\",copied_stats={strength=18}}");
+    }
+
+    SECTION("a null table is refused") {
+        data_table into;
+
+        REQUIRE_THROWS_AS(into.set("stats", data_table::value_type(std::shared_ptr<const data_table>())), exception);
+        REQUIRE(into.empty());
+    }
 }

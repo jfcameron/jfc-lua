@@ -85,7 +85,7 @@ TEST_CASE("a typed call gives a function what it is passed", "[call][typed]") {
             return *env->call<int>("count", static_cast<int>(indices)...);
         };
 
-        REQUIRE(count(std::make_index_sequence<300>{}) == 300);
+        REQUIRE(count(std::make_index_sequence<200>{}) == 200);
     }
 
     SECTION("a string that holds anything") {

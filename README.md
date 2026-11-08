@@ -72,7 +72,24 @@ Reads return an optional, which is empty if nothing is at the path or what is th
 
 ### Data tables
 
-A data table is a Lua table restricted to what can be saved: numbers, booleans, strings, and other data tables. Reading one refuses functions, userdata, tables that contain themselves, and nesting deeper than 128 levels, or steps over them if asked to. A data table can be written out as a Lua table literal, and read back from that text without running it as Lua, so a save file is data and cannot run code when it's loaded.
+A data table is a Lua table restricted to what can be saved: numbers, booleans, strings, and other data tables. Reading one refuses functions, userdata, tables that contain themselves, and nesting deeper than 128 levels, or steps over them if asked to. A data table can be written out as a Lua table literal, and read back from that text without running it as Lua, so a save file is data and cannot run code when it's loaded. `to_string()` writes it on one line; `to_string(4)` writes a field a line, indented four spaces a level, for a file people read and diff. `get` gives whatever a key holds, as a `data_table::value_type`, and `set` takes one back, so a value is copied without asking for each type in turn.
+
+### Reading a format
+A `table_reader` reads a data table as a file format says it is. It is made with the fields the format has, and refuses a table holding any other, so a misspelt field is an error rather than a value quietly left at its default. `get` reads a field as the kind it names and refuses any other, saying where it is and what was wanted, as a typed call does:
+
+```cpp
+const auto table = data_table::from_string(text);
+const table_reader read(table, "sky.lua", {"version", "label", "colour", "phases"});
+
+static_cast<void>(read.get<int>("version", {.least = 1, .most = 1}));
+
+const auto label = read.get<std::optional<std::string>>("label");
+const auto colour = read.get<std::array<float, 3>>("colour", {.least = 0, .most = 1});
+
+for (const auto &phase : read.tables("phases", {"hour", "sun"})) hours.push_back(phase.get<double>("hour"));
+```
+
+A `std::optional` may be absent, as it may be nil in a typed function. A `double` or `float` takes a finite number, a whole number type a number that is whole and fits it, a `std::vector` a list, and a `std::array` a list of exactly its size. A table in the table is read by a reader of its own, from `table` or, for a list of them, `tables`, and its refusals say its path: `sky.lua: phases[2].hour wants a number, got a string`. `refused` makes a refusal of the format's own, after where the reader is.
 
 ### Userdata
 A C++ object is given to Lua as a `std::shared_ptr`, and both sides own it: the object lives until neither C++ nor any script holds it, so neither can leave the other with a dangling pointer. The same object is always the same Lua value, so a script can compare objects and use them as keys. Registering a type gives its objects methods, called as `object:name(arguments)`, and scripts can also set fields of their own on an object. Reading an object back as the wrong type gives nothing rather than a bad cast.

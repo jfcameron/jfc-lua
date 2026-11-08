@@ -116,8 +116,14 @@ namespace jfc::lua {
     std::shared_ptr<const data_table> data_table::get_data_table(const key &aKey) const {
         const auto *const found = _find(aKey);
 
-        if (const auto *const value = found ? std::get_if<std::shared_ptr<data_table>>(found) : nullptr)
+        if (const auto *const value = found ? std::get_if<std::shared_ptr<const data_table>>(found) : nullptr)
             return *value;
+
+        return {};
+    }
+
+    std::optional<data_table::value_type> data_table::get(const key &aKey) const {
+        if (const auto *const found = _find(aKey)) return *found;
 
         return {};
     }
@@ -130,8 +136,15 @@ namespace jfc::lua {
 
     void data_table::set(const key &aKey, const char *const aValue) { _assign(aKey, std::string(aValue)); }
 
-    void data_table::set(const key &aKey, const data_table &aValue) { 
-        _assign(aKey, std::make_shared<data_table>(aValue)); 
+    void data_table::set(const key &aKey, const data_table &aValue) {
+        _assign(aKey, std::make_shared<const data_table>(aValue));
+    }
+
+    void data_table::set(const key &aKey, value_type aValue) {
+        if (const auto *const pTable = std::get_if<std::shared_ptr<const data_table>>(&aValue); pTable && !*pTable)
+            throw exception("a table cannot hold a null table");
+
+        _assign(aKey, std::move(aValue));
     }
 
     void data_table::erase(const key &aKey) {
@@ -198,7 +211,7 @@ namespace jfc::lua {
 
     namespace {
         constexpr const char *RESERVED[] = {
-            "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "if", "in",
+            "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if", "in",
             "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while"
         };
 
@@ -633,71 +646,77 @@ namespace jfc::lua {
         };
     }
 
-    std::ostream &operator<<(std::ostream &aOut, const data_table &aValue) {
-        std::stringstream stream;
+    void data_table::_write(std::ostream &aOut, const std::size_t aIndent, const std::size_t aDepth) const {
+        const auto fields = keys();
 
-        stream << "{";
+        if (fields.empty()) { aOut << "{}"; return; }
 
-        const auto fields = aValue.keys();
+        const bool lined = aIndent > 0;
+        const std::string inner(lined ? aIndent * (aDepth + 1) : 0, ' '), outer(lined ? aIndent * aDepth : 0, ' ');
+        const char *const equals = lined ? " = " : "=";
+
+        aOut << (lined ? "{\n" : "{");
 
         std::size_t remaining = fields.size();
 
-        const auto write = [&stream](const data_table::value_type &aValue) {
-            std::visit([&stream](auto &&aHeld) {
-                using value_type = std::decay_t<decltype(aHeld)>;
-
-                if constexpr (std::is_same_v<value_type, double>) _write_number(stream, aHeld);
-                else if constexpr (std::is_same_v<value_type, bool>) stream << (aHeld ? "true" : "false");
-                else if constexpr (std::is_same_v<value_type, std::string>) _write_quoted(stream, aHeld);
-                else if constexpr (std::is_same_v<value_type, std::shared_ptr<data_table>>) {
-                    if (!aHeld) throw exception("table operator<<: null subtable");
-
-                    stream << *aHeld;
-                }
-                else throw exception("table operator<<: unsupported type");
-            }, aValue);
-        };
-
-        const auto separate = [&stream, &remaining]() { if (--remaining) stream << ","; };
-
         for (const auto &field : fields) {
+            aOut << inner;
+
             if (field.is_number()) {
-                stream << "[";
+                aOut << "[";
 
-                _write_number(stream, std::get<double>(field.value()));
+                _write_number(aOut, std::get<double>(field.value()));
 
-                stream << "]=";
+                aOut << "]" << equals;
             }
             else if (field.is_boolean())
-                stream << "[" << (std::get<bool>(field.value()) ? "true" : "false") << "]=";
+                aOut << "[" << (std::get<bool>(field.value()) ? "true" : "false") << "]" << equals;
             else {
                 const auto &name = std::get<std::string>(field.value());
 
-                if (_is_bare_key(name)) stream << name << "=";
+                if (_is_bare_key(name)) aOut << name << equals;
                 else {
-                    stream << "[";
+                    aOut << "[";
 
-                    _write_quoted(stream, name);
+                    _write_quoted(aOut, name);
 
-                    stream << "]=";
+                    aOut << "]" << equals;
                 }
             }
 
-            write(*aValue._find(field));
-            separate();
+            std::visit([&](auto &&aHeld) {
+                using held_type = std::decay_t<decltype(aHeld)>;
+
+                if constexpr (std::is_same_v<held_type, double>) _write_number(aOut, aHeld);
+                else if constexpr (std::is_same_v<held_type, bool>) aOut << (aHeld ? "true" : "false");
+                else if constexpr (std::is_same_v<held_type, std::string>) _write_quoted(aOut, aHeld);
+                else if constexpr (std::is_same_v<held_type, std::shared_ptr<const data_table>>) {
+                    if (!aHeld) throw exception("table operator<<: null subtable");
+
+                    aHeld->_write(aOut, aIndent, aDepth + 1);
+                }
+                else throw exception("table operator<<: unsupported type");
+            }, *_find(field));
+
+            if (lined) aOut << ",\n";
+            else if (--remaining) aOut << ",";
         }
 
-        stream << "}";
-
-        aOut << stream.str();
-
-        return aOut;
+        aOut << outer << "}";
     }
 
-    std::string data_table::to_string() const {
+    std::ostream &operator<<(std::ostream &aOut, const data_table &aValue) {
+        std::ostringstream stream;
+
+        aValue._write(stream, 0, 0);
+
+        return aOut << stream.str();
+    }
+
+    std::string data_table::to_string(const std::size_t aIndent) const {
         std::ostringstream out;
 
-        out << *this;
+        _write(out, aIndent, 0);
 
         return out.str();
     }
@@ -726,7 +745,7 @@ namespace jfc::lua {
                 if constexpr (std::is_same_v<held_type, double>) lua_pushnumber(L, aHeld);
                 else if constexpr (std::is_same_v<held_type, bool>) lua_pushboolean(L, aHeld);
                 else if constexpr (std::is_same_v<held_type, std::string>) lua_pushlstring(L, aHeld.data(), aHeld.size());
-                else if constexpr (std::is_same_v<held_type, std::shared_ptr<data_table>>)
+                else if constexpr (std::is_same_v<held_type, std::shared_ptr<const data_table>>)
                 {
                     if (!aHeld) throw exception("data_table::push_to_lua_state: null subtable");
 

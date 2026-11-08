@@ -52,11 +52,17 @@ namespace jfc::lua
         /// \brief construct a table with no content
         data_table() = default;
 
+        /// \brief what a field holds: a number, a boolean, a string or a table
+        using value_type = std::variant<double, bool, std::string, std::shared_ptr<const data_table>>;
+
         /// \brief writes the table to a lua state
         void push_to_lua_state(lua_State *L) const;
 
         /// \brief the table as a lua table literal
-        [[nodiscard]] std::string to_string() const;
+        ///
+        /// aIndent 0 writes it on one line. Any other writes a field a line, each level aIndent spaces further in
+        /// than the one holding it, and a comma after every field.
+        [[nodiscard]] std::string to_string(std::size_t aIndent = 0) const;
 
         /// \brief read back what to_string produced **without running it as lua**
         ///
@@ -73,11 +79,19 @@ namespace jfc::lua
         /// \brief the subtable at aKey, or null if there is no such key or it holds another type
         [[nodiscard]] std::shared_ptr<const data_table> get_data_table(const key &aKey) const;
 
+        /// \brief the value at aKey, whichever type it is, or nothing if there is no such key
+        [[nodiscard]] std::optional<value_type> get(const key &aKey) const;
+
         void set(const key &aKey, const double aValue);
         void set(const key &aKey, const bool aValue);
         void set(const key &aKey, std::string aValue);
         void set(const key &aKey, const char *const aValue);
         void set(const key &aKey, const data_table &aValue);
+
+        /// \brief puts aValue at aKey, whichever type it is, as get gave it
+        ///
+        /// \warning throws exception for a null table
+        void set(const key &aKey, value_type aValue);
 
         /// \brief removes aKey, if it is there
         void erase(const key &aKey);
@@ -93,10 +107,11 @@ namespace jfc::lua
         [[nodiscard]] std::vector<key> keys() const;
 
     private:
-        using value_type = std::variant<double, bool, std::string, std::shared_ptr<data_table>>;
-
         /// \brief the value at aKey, whichever container holds that kind of key, or null
         [[nodiscard]] const value_type *_find(const key &aKey) const;
+
+        /// \brief writes the literal to_string returns, the table aDepth levels in
+        void _write(std::ostream &aOut, std::size_t aIndent, std::size_t aDepth) const;
 
         /// \brief put aValue at aKey, in whichever container holds that kind of key
         void _assign(const key &aKey, value_type aValue);
