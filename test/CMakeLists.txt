@@ -23,6 +23,7 @@ jfc_add_tests(
         "${CMAKE_CURRENT_LIST_DIR}/path_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/protected_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/reference_test.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/registered_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/stack_balance_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/table_reader_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/table_view_test.cpp"

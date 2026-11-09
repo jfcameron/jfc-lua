@@ -301,7 +301,7 @@ namespace jfc::lua::detail {
 
 namespace jfc::lua {
     void interpreter::_register_type(std::string aName, const void *const aTypeKey,
-        std::vector<std::pair<std::string, detail::typed_method_type>> aMethods) {
+        std::vector<detail::made_method> aMethods) {
         auto *const L = m_pState.get();
 
         const stack_guard guard(L);
@@ -316,7 +316,7 @@ namespace jfc::lua {
 
             const int methods = lua_gettop(L);
 
-            for (auto &[name, method] : aMethods) {
+            for (auto &[name, method, describe] : aMethods) {
                 auto *const pStorage = static_cast<detail::typed_method_type *>(
                     lua_newuserdata(L, sizeof(detail::typed_method_type)));
 
@@ -363,6 +363,12 @@ namespace jfc::lua {
             lua_pushvalue(L, metatable);
             lua_rawset(L, -3);
         })) throw exception("could not register the type " + aName + ": " + *error);
+
+        auto &listed = m_pLimits->methods[aName];
+
+        listed.clear();
+
+        for (const auto &each : aMethods) listed[each.name] = each.describe;
     }
 
     reference interpreter::hold(const userdata &aObject) {

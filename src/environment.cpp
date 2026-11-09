@@ -184,9 +184,10 @@ namespace {
 
 namespace jfc::lua {
     environment::environment(std::shared_ptr<lua_State> aState, const int aRootReference,
-        const std::optional<std::size_t> aInstructionBudget)
+        const std::optional<std::size_t> aInstructionBudget, std::string aName)
     : reference(std::move(aState), aRootReference)
     , m_InstructionBudget(aInstructionBudget)
+    , m_Name(std::move(aName))
     {}
 
     namespace {
@@ -647,13 +648,18 @@ namespace jfc::lua {
         }
     }
 
-    void environment::register_function(const path &aName, closure_type aClosure)
-        { _register(aName, detail::make_typed_closure(std::move(aClosure)), false); }
+    void environment::register_function(const path &aName, closure_type aClosure) {
+        _register(aName, detail::make_typed_closure(std::move(aClosure)), detail::signature_maker_of<closure_type>(),
+            false);
+    }
 
-    void environment::register_yielding_function(const path &aName, closure_type aClosure)
-        { _register(aName, detail::make_typed_closure(std::move(aClosure)), true); }
+    void environment::register_yielding_function(const path &aName, closure_type aClosure) {
+        _register(aName, detail::make_typed_closure(std::move(aClosure)), detail::signature_maker_of<closure_type>(),
+            true);
+    }
 
-    void environment::_register(const path &aName, detail::typed_closure_type aClosure, const bool aYields) {
+    void environment::_register(const path &aName, detail::typed_closure_type aClosure,
+        const detail::signature_maker aDescribe, const bool aYields) {
         auto *L = state();
 
         const stack_guard guard(L);
@@ -685,6 +691,14 @@ namespace jfc::lua {
 
             lua_pushcclosure(L, trampoline, 1);
         });
+
+        if (m_Name.empty()) return;
+
+        void *ud = nullptr;
+
+        lua_getallocf(L, &ud);
+
+        static_cast<interpreter_limits *>(ud)->registered[m_Name][name] = {aDescribe, aYields};
     }
 
     std::optional<coroutine> environment::make_coroutine(const path &aFunction) {

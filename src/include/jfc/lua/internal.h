@@ -6,6 +6,7 @@
 #include <jfc/lua/exception.h>
 #include <jfc/lua/key.h>
 #include <jfc/lua/reference.h>
+#include <jfc/lua/typed_call.h>
 #include <jfc/lua/userdata.h>
 #include <jfc/lua/types.h>
 
@@ -21,6 +22,7 @@
 #include <exception>
 #include <functional>
 #include <iosfwd>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -77,6 +79,16 @@ namespace jfc::lua {
 
         //! told of every call a script makes into a registered function
         std::function<void(std::string_view, std::chrono::nanoseconds)> callTimer;
+
+        //! every function registered in a named environment, by the environment's name and the function's path: how to
+        //! say its signature, and whether it yields
+        std::map<std::string, std::map<std::string, std::pair<detail::signature_maker, bool>>> registered;
+
+        //! every bound type's methods, by the type's name and the method's: how to say each one's signature
+        std::map<std::string, std::map<std::string, detail::signature_maker>> methods;
+
+        //! the latest environment made with each name
+        std::map<std::string, std::weak_ptr<environment>> latest;
 
         //! the state these limits govern, for what is handed out from inside a call
         std::weak_ptr<lua_State> state;

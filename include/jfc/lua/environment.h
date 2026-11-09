@@ -49,6 +49,11 @@ namespace jfc::lua
         ///
         /// Empty defers to the interpreter's figure, which is the usual case. 
         const std::optional<std::size_t> INSTRUCTION_BUDGET{};
+
+        /// \brief what kind of environment this is, under which interpreter::registered lists what is registered here
+        ///
+        /// Empty lists nothing. Environments of one kind share a name, and are listed together.
+        const std::string NAME{};
     };
 
     /// \brief an independent set of global variables, and the scripts that run against it
@@ -84,8 +89,10 @@ namespace jfc::lua
         /// left. Results may be a std::tuple for several, and a std::optional is nil when empty.
         template <typename function_type>
         requires (!std::is_convertible_v<function_type, closure_type>)
-        void register_function(const path &aName, function_type &&aFunction)
-            { _register(aName, detail::make_typed_closure(std::forward<function_type>(aFunction)), false); }
+        void register_function(const path &aName, function_type &&aFunction) {
+            _register(aName, detail::make_typed_closure(std::forward<function_type>(aFunction)),
+                detail::signature_maker_of<function_type>(), false);
+        }
 
         /// \brief registers a closure that suspends the coroutine calling it
         void register_yielding_function(const path &aName, closure_type aClosure);
@@ -93,8 +100,10 @@ namespace jfc::lua
         /// \brief registers a function like register_function's, that suspends the coroutine calling it
         template <typename function_type>
         requires (!std::is_convertible_v<function_type, closure_type>)
-        void register_yielding_function(const path &aName, function_type &&aFunction)
-            { _register(aName, detail::make_typed_closure(std::forward<function_type>(aFunction)), true); }
+        void register_yielding_function(const path &aName, function_type &&aFunction) {
+            _register(aName, detail::make_typed_closure(std::forward<function_type>(aFunction)),
+                detail::signature_maker_of<function_type>(), true);
+        }
 
         /// \brief the function at aFunction, ready to run as a coroutine against this environment
         [[nodiscard]] std::optional<coroutine> make_coroutine(const path &aFunction);
@@ -121,15 +130,19 @@ namespace jfc::lua
         friend class interpreter;
 
         environment(std::shared_ptr<lua_State> aState, const int aRootReference,
-            const std::optional<std::size_t> aInstructionBudget);
+            const std::optional<std::size_t> aInstructionBudget, std::string aName);
 
-        //! registers aClosure at aName, yielding its results if aYields. \see register_function
-        void _register(const path &aName, detail::typed_closure_type aClosure, bool aYields);
+        //! registers aClosure at aName, yielding its results if aYields, kept in the catalogue by aDescribe where this
+        //! environment has a name. \see register_function
+        void _register(const path &aName, detail::typed_closure_type aClosure, detail::signature_maker aDescribe,
+            bool aYields);
 
         //! a typed call of what is at aPath
         [[nodiscard]] error_type _call(const path &aPath, const detail::stack_work &aPush, const detail::stack_work &aRead);
 
         std::optional<std::size_t> m_InstructionBudget;
+
+        std::string m_Name;
     };
 }
 

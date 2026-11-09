@@ -5,6 +5,7 @@
 
 #include <jfc/lua/data_table.h>
 #include <jfc/lua/reference.h>
+#include <jfc/lua/signature.h>
 #include <jfc/lua/table_view.h>
 #include <jfc/lua/types.h>
 #include <jfc/lua/userdata.h>
@@ -112,6 +113,61 @@ namespace jfc::lua::detail
 
     template <typename> struct is_tuple : std::false_type {};
     template <typename... value_types> struct is_tuple<std::tuple<value_types...>> : std::true_type {};
+
+    /// \brief a bound type's name, by its key, for a signature to say it
+    using type_namer = std::function<std::string(const void *aTypeKey)>;
+
+    /// \brief a registered function's signature, made only when it is asked for
+    using signature_maker = signature (*)(const type_namer &aNameOf);
+
+    template <typename value_type>
+    [[nodiscard]] signature::value described(const type_namer &aNameOf) {
+        if constexpr (is_optional<value_type>::value) {
+            auto out = described<typename value_type::value_type>(aNameOf);
+
+            out.optional = true;
+
+            return out;
+        }
+        else if constexpr (std::is_same_v<value_type, bool>) return {"boolean"};
+        else if constexpr (std::is_integral_v<value_type>) return {"integer"};
+        else if constexpr (std::is_arithmetic_v<value_type>) return {"number"};
+        else if constexpr (std::is_same_v<value_type, std::string> || std::is_same_v<value_type, std::string_view>
+            || std::is_same_v<value_type, const char *>) return {"string"};
+        else if constexpr (std::is_same_v<value_type, data_table> || std::is_same_v<value_type, table_view>)
+            return {"table"};
+        else if constexpr (std::is_same_v<value_type, function_reference>) return {"function"};
+        else if constexpr (std::is_same_v<value_type, reference>) return {"value"};
+        else if constexpr (std::is_same_v<value_type, userdata>) return {"userdata"};
+        else if constexpr (std::is_same_v<value_type, std::nullptr_t>) return {"nil"};
+        else if constexpr (is_shared_ptr<value_type>::value)
+            return {aNameOf(&userdata_tag<std::remove_cv_t<typename value_type::element_type>>::id)};
+        else static_assert(always_false<value_type>, "a signature says only what a typed function can take or give");
+    }
+
+    template <typename value_type>
+    void describe_argument(signature &aOut, const type_namer &aNameOf) {
+        if constexpr (std::is_same_v<value_type, value_list_type>) aOut.takes_rest = true;
+        else aOut.arguments.push_back(described<value_type>(aNameOf));
+    }
+
+    template <typename value_type>
+    void describe_result(signature &aOut, const type_namer &aNameOf) {
+        if constexpr (std::is_same_v<value_type, value_list_type>) aOut.gives_rest = true;
+        else aOut.results.push_back(described<value_type>(aNameOf));
+    }
+
+    template <typename result_type>
+    void describe_results(signature &aOut, const type_namer &aNameOf) {
+        using value_type = std::decay_t<result_type>;
+
+        if constexpr (is_tuple<value_type>::value) {
+            [&]<typename... element_types>(std::type_identity<std::tuple<element_types...>>) {
+                (describe_result<std::decay_t<element_types>>(aOut, aNameOf), ...);
+            }(std::type_identity<value_type>{});
+        }
+        else if constexpr (!std::is_void_v<value_type>) describe_result<value_type>(aOut, aNameOf);
+    }
 
     template <typename value_type>
     [[nodiscard]] value_type read_argument(const call_frame &aFrame, const int aIndex) {
@@ -236,6 +292,17 @@ namespace jfc::lua::detail
         [[nodiscard]] static int call(call_type &&aCall, call_frame &aFrame) {
             return run(std::forward<call_type>(aCall), aFrame, std::index_sequence_for<argument_types...>{});
         }
+
+        //! what a call takes and gives, as its signature says
+        [[nodiscard]] static signature describe(const type_namer &aNameOf) {
+            signature out;
+
+            (describe_argument<std::remove_cvref_t<argument_types>>(out, aNameOf), ...);
+
+            describe_results<result_type>(out, aNameOf);
+
+            return out;
+        }
     };
 
     template <typename> struct typed_signature;
@@ -289,6 +356,22 @@ namespace jfc::lua::detail
         }
         else static_assert(always_false<function_type>, "a typed method's signature says what to read from the script, "
             "so it cannot be a generic lambda or an overloaded function object");
+    }
+
+    //! how to say a typed function's signature; nothing for one make_typed_closure refuses
+    template <typename function_type>
+    [[nodiscard]] constexpr signature_maker signature_maker_of() {
+        if constexpr (has_one_signature<function_type>)
+            return &typed_signature<signature_of<function_type>>::call_type::describe;
+        else return nullptr;
+    }
+
+    //! how to say a typed method's signature, after the object it is called on
+    template <typename object_type, typename function_type>
+    [[nodiscard]] constexpr signature_maker method_signature_maker_of() {
+        if constexpr (has_one_signature<function_type>)
+            return &typed_method_signature<object_type, signature_of<function_type>>::call_type::describe;
+        else return nullptr;
     }
 
     template <typename> inline constexpr bool borrows_the_stack = false;
@@ -354,6 +437,13 @@ namespace jfc::lua::detail
     struct named_method final {
         std::string name;
         function_type function;
+    };
+
+    /// \brief a method for interpreter::register_type, made: what runs, and how to say its signature
+    struct made_method final {
+        std::string name;
+        typed_method_type method;
+        signature_maker describe;
     };
 }
 

@@ -4,6 +4,7 @@
 #define JFC_LUA_INTERPRETER_H
 
 #include <jfc/lua/environment.h>
+#include <jfc/lua/signature.h>
 #include <jfc/lua/path.h>
 #include <jfc/lua/reference.h>
 #include <jfc/lua/data_table.h>
@@ -168,12 +169,13 @@ namespace jfc::lua {
             std::vector<std::pair<std::string, 
             method_type<object_type>>> aMethods
         ) {
-            std::vector<std::pair<std::string, detail::typed_method_type>> methods;
+            std::vector<detail::made_method> methods;
 
             methods.reserve(aMethods.size());
 
             for (auto &[name, function] : aMethods)
-                methods.emplace_back(name, detail::make_typed_method<object_type>(std::move(function)));
+                methods.push_back({name, detail::make_typed_method<object_type>(std::move(function)),
+                    detail::method_signature_maker_of<object_type, method_type<object_type>>()});
 
             _register_type(std::move(aName), userdata::make(std::shared_ptr<object_type>()).type_key(),
                 std::move(methods));
@@ -183,16 +185,20 @@ namespace jfc::lua {
         /// \see jfc::lua::method
         template <typename object_type, typename... function_types>
         void register_type(std::string aName, detail::named_method<function_types>... aMethods) {
-            std::vector<std::pair<std::string, detail::typed_method_type>> methods;
+            std::vector<detail::made_method> methods;
 
             methods.reserve(sizeof...(function_types));
 
-            (methods.emplace_back(std::move(aMethods.name),
-                detail::make_typed_method<object_type>(std::move(aMethods.function))), ...);
+            (methods.push_back({std::move(aMethods.name), detail::make_typed_method<object_type>(
+                std::move(aMethods.function)), detail::method_signature_maker_of<object_type, function_types>()}), ...);
 
             _register_type(std::move(aName), userdata::make(std::shared_ptr<object_type>()).type_key(),
                 std::move(methods));
         }
+
+        /// \brief what has been registered here: the functions of every environment made with a name
+        /// (environment_policy::NAME), and the methods of every bound type, each with its signature
+        [[nodiscard]] catalogue registered() const;
 
         /// \brief hold a reference to a userdata directly in order to prevent it from going out of scope
         [[nodiscard]] reference hold(const userdata &aObject);
@@ -220,8 +226,7 @@ namespace jfc::lua {
         //! the standard library opened, its snapshots taken and the globals made an environment
         void _set_up(lua_State *L);
 
-        void _register_type(std::string aName, const void *aTypeKey,
-            std::vector<std::pair<std::string, detail::typed_method_type>> aMethods);
+        void _register_type(std::string aName, const void *aTypeKey, std::vector<detail::made_method> aMethods);
 
        [[nodiscard]] std::optional<userdata> _read_userdata(const path &aPath) const;
 

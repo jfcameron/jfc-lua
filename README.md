@@ -61,6 +61,9 @@ A `function_reference` is a function the script passed, to call during the call 
 
 A trailing `value_list_type` takes every argument left, for a function that is only partly fixed. On its own it is a function whose arguments are decided at run time, which remains an ordinary way to write one, though typed functions are faster.
 
+### What is registered
+An environment made with a name, `make_environment({standard_library::safe, {}, "rules"})`, has what is registered in it listed by `interpreter::registered()`, under that name: each function's path and signature, its arguments' and results' types as its C++ signature says them (`string`, `integer`, an optional `number`, the name a type was bound with), whether it takes or gives every value left, and whether it waits. Environments of one kind share a name and are listed together, and each bound type's methods are listed too. It is for a host that documents its API or offers completion in an editor; an environment with no name lists nothing. It lists the functions written in Lua too, as the latest environment of each name reaches them from its globals, through tables a few deep: each with the name its script was run under and the line it was defined on, so a host can read the comment over it.
+
 ### Script names
 `run` and `validate_syntax` take a name for the script, usually its file, which errors use for it and for every function it defines: `rules.lua:3: the bucket leaks`. Without one, Lua quotes the start of the script instead.
 

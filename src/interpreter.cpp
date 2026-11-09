@@ -7,8 +7,11 @@
 #include <jfc/lua/interpreter.h>
 #include <jfc/lua/data_table.h>
 
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <memory>
+#include <set>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -18,6 +21,55 @@
 using jfc::lua::interpreter_limits;
 
 namespace {
+    //! how many tables deep from an environment's globals `registered` looks for functions written in lua
+    constexpr int DEFINED_DEPTH = 4;
+
+    [[nodiscard]] bool _identifier(const std::string &aKey) {
+        const auto letter = [](const unsigned char aEach) { return std::isalpha(aEach) || aEach == '_'; };
+
+        return !aKey.empty() && letter(static_cast<unsigned char>(aKey[0])) && std::all_of(aKey.begin(), aKey.end(),
+            [&](const char aEach) { return letter(static_cast<unsigned char>(aEach))
+                || std::isdigit(static_cast<unsigned char>(aEach)); });
+    }
+
+    //! a script's name as `run` was given it; empty for a script run without one
+    [[nodiscard]] std::string _source_of(const char *const aSource) {
+        return aSource && (aSource[0] == '@' || aSource[0] == '=') ? std::string(aSource + 1) : std::string();
+    }
+
+    //! every function written in lua in the table at aTable, and in its tables to aDepth more, each table once
+    void _walk(lua_State *const L, const int aTable, const std::string &aPrefix, const int aDepth,
+        std::set<const void *> &aVisited, std::map<std::string, jfc::lua::definition> &aOut) {
+        if (!lua_checkstack(L, 4)) return;
+
+        lua_pushnil(L);
+
+        while (lua_next(L, aTable)) {
+            if (lua_type(L, -2) == LUA_TSTRING) {
+                std::size_t length = 0;
+
+                const char *const pKey = lua_tolstring(L, -2, &length);
+                const std::string key(pKey, length);
+
+                if (_identifier(key)) {
+                    const auto path = aPrefix.empty() ? key : aPrefix + "." + key;
+
+                    if (lua_isfunction(L, -1) && !lua_iscfunction(L, -1)) {
+                        lua_Debug about{};
+
+                        lua_pushvalue(L, -1);
+
+                        if (lua_getinfo(L, ">S", &about)) aOut[path] = {_source_of(about.source), about.linedefined};
+                    }
+                    else if (lua_istable(L, -1) && aDepth > 0 && aVisited.insert(lua_topointer(L, -1)).second)
+                        _walk(L, lua_gettop(L), path, aDepth - 1, aVisited, aOut);
+                }
+            }
+
+            lua_pop(L, 1);
+        }
+    }
+
     int _reject_standard_library_write(lua_State *const L) {
         return luaL_error(L, "the standard library is shared by every environment and cannot be "
             "modified from within one");
@@ -326,7 +378,7 @@ namespace jfc::lua {
         lua_pushvalue(L, LUA_GLOBALSINDEX);
 
         m_pGlobals = environment_shared_ptr_type(
-            new environment(m_pState, luaL_ref(L, LUA_REGISTRYINDEX), {}));
+            new environment(m_pState, luaL_ref(L, LUA_REGISTRYINDEX), {}, {}));
     }
 
     environment_shared_ptr_type interpreter::make_environment(environment_policy aPolicy) {
@@ -354,7 +406,62 @@ namespace jfc::lua {
             root = luaL_ref(L, LUA_REGISTRYINDEX);
         })) throw exception("could not make an environment: " + *error);
 
-        return environment_shared_ptr_type(new environment(m_pState, root, aPolicy.INSTRUCTION_BUDGET));
+        auto made = environment_shared_ptr_type(new environment(m_pState, root, aPolicy.INSTRUCTION_BUDGET,
+            aPolicy.NAME));
+
+        if (!aPolicy.NAME.empty()) m_pLimits->latest[aPolicy.NAME] = made;
+
+        return made;
+    }
+
+    catalogue interpreter::registered() const {
+        auto *const L = m_pState.get();
+
+        const detail::type_namer nameOf = [L](const void *const aTypeKey) {
+            return detail::type_name(L, aTypeKey).value_or("userdata");
+        };
+
+        catalogue out;
+
+        for (const auto &[name, functions] : m_pLimits->registered) {
+            auto &listed = out.environments[name];
+
+            for (const auto &[path, made] : functions) {
+                auto each = made.first ? made.first(nameOf) : signature{};
+
+                each.yields = made.second;
+                listed.emplace(path, std::move(each));
+            }
+        }
+
+        for (const auto &[type, methods] : m_pLimits->methods) {
+            auto &listed = out.types[type];
+
+            for (const auto &[name, describe] : methods)
+                listed.emplace(name, describe ? describe(nameOf) : signature{});
+        }
+
+        for (const auto &[name, latest] : m_pLimits->latest) {
+            const auto pEnvironment = latest.lock();
+
+            if (!pEnvironment) continue;
+
+            const stack_guard guard(L);
+
+            auto &listed = out.defined[name];
+
+            std::set<const void *> visited;
+
+            if (const auto error = detail::protect(L, [&](lua_State *) {
+                lua_rawgeti(L, LUA_REGISTRYINDEX, pEnvironment->registry_reference());
+
+                visited.insert(lua_topointer(L, -1));
+
+                _walk(L, lua_gettop(L), {}, DEFINED_DEPTH, visited, listed);
+            })) throw exception("could not list what the " + name + " environment defines: " + *error);
+        }
+
+        return out;
     }
 
     std::optional<double> interpreter::read_number(const path &aPath) const
