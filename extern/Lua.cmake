@@ -32,6 +32,26 @@ elseif (JFC_LUA_BACKEND STREQUAL "lua51")
 
     list(TRANSFORM _lua_sources PREPEND "${_lua_root}/")
 
+    # 5.1.5's luaH_getnum subtracts before its unsigned cast, which overflows at INT_MIN: compile a copy that casts first
+    set(_lua_table_line "cast(unsigned int, key-1) < cast(unsigned int, t->sizearray)")
+    set(_lua_table_copy "${CMAKE_CURRENT_BINARY_DIR}/lua51-patched/ltable.c")
+
+    file(READ "${_lua_root}/ltable.c" _lua_table)
+    string(FIND "${_lua_table}" "${_lua_table_line}" _lua_table_at)
+
+    if (_lua_table_at EQUAL -1)
+        message(FATAL_ERROR "extern/lua51/src/ltable.c no longer has the line jfc-lua replaces")
+    endif()
+
+    string(REPLACE "${_lua_table_line}" "cast(unsigned int, key) - 1u < cast(unsigned int, t->sizearray)"
+        _lua_table "${_lua_table}")
+    file(WRITE "${_lua_table_copy}.new" "${_lua_table}")
+    configure_file("${_lua_table_copy}.new" "${_lua_table_copy}" COPYONLY)
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_lua_root}/ltable.c")
+
+    list(REMOVE_ITEM _lua_sources "${_lua_root}/ltable.c")
+    list(APPEND _lua_sources "${_lua_table_copy}")
+
     set_source_files_properties(${_lua_sources} PROPERTIES LANGUAGE CXX)
 
     add_library(liblua STATIC ${_lua_sources})

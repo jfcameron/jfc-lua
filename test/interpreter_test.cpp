@@ -32,3 +32,16 @@ TEST_CASE( "jfc::lua::interpreter_test", "[jfc::lua::interpreter]" )
     }
 }
 
+TEST_CASE("integer boundary constants and negative table keys remain valid", "[jfc::lua::interpreter]")
+{
+    interpreter interp;
+    const auto error = interp.run(R"lua(
+        local minimum = -2147483648
+        local values = {[minimum] = 'minimum', [1] = 'first'}
+        assert(values[minimum] == 'minimum')
+        assert(values[minimum + 1] == nil)
+        assert(values[0] == nil and values[1] == 'first')
+    )lua");
+    REQUIRE_FALSE(error.has_value());
+}
+
