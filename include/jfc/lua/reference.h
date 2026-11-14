@@ -8,6 +8,7 @@
 #include <jfc/lua/types.h>
 #include <jfc/lua/userdata.h>
 
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -183,13 +184,13 @@ namespace jfc::lua
         /// \brief the bound object at aPath
         [[nodiscard]] std::optional<userdata> _read_userdata(const path &aPath) const;
 
-        /// \brief call the referenced value, under aInstructionBudget if this is the outermost run
+        /// \brief call the referenced value, under aTimeBudget if this is the outermost run
         [[nodiscard]] error_type _call(const value_list_type &aArguments, value_list_type &aResults,
-            std::optional<std::size_t> aInstructionBudget);
+            std::optional<std::chrono::nanoseconds> aTimeBudget);
 
         /// \brief the same for a typed call
         [[nodiscard]] error_type _call(const detail::stack_work &aPush, const detail::stack_work &aRead,
-            std::optional<std::size_t> aInstructionBudget);
+            std::optional<std::chrono::nanoseconds> aTimeBudget);
 
     private:
         friend class environment;
@@ -204,7 +205,7 @@ namespace jfc::lua
 
     /// \brief a function a script gave a typed function, to call now or to keep
     ///
-    /// It runs in the environment it was made in, under the instruction budget of the script that gave it.
+    /// It runs in the environment it was made in, under the time budget of the script that gave it.
     ///
     /// \warning it keeps the interpreter's state alive, so keeping one inside something lua owns, such as a registered
     /// closure's captures, keeps both for good
@@ -225,9 +226,9 @@ namespace jfc::lua
         friend class detail::call_frame;
 
         function_reference(std::shared_ptr<lua_State> aState, const int aRegistryReference,
-            const std::optional<std::size_t> aInstructionBudget);
+            const std::optional<std::chrono::nanoseconds> aTimeBudget);
 
-        std::optional<std::size_t> m_InstructionBudget;
+        std::optional<std::chrono::nanoseconds> m_TimeBudget;
     };
 }
 

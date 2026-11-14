@@ -4,6 +4,8 @@
 
 #include <jfc/lua.h>
 
+#include <chrono>
+
 #include <lua.hpp>
 
 #include <optional>
@@ -11,6 +13,7 @@
 #include <variant>
 
 using namespace jfc::lua;
+using namespace std::chrono_literals;
 
 namespace {
     [[nodiscard]] double number(const value_list_type &aValues, const std::size_t aIndex) {
@@ -193,15 +196,15 @@ TEST_CASE("**a plain registered function can be called from a coroutine as from 
     REQUIRE(number(out, 0) == 7);
 }
 
-TEST_CASE("**each resume spends its own instruction budget**", "[coroutine][limits]") {
+TEST_CASE("**each resume spends its own time budget**", "[coroutine][limits]") {
     interpreter lua;
 
-    auto env = lua.make_environment({standard_library::safe, 100000});
+    auto env = lua.make_environment({standard_library::safe, 20ms});
 
     REQUIRE_FALSE(env->run(R"(
         function busy_but_polite()
             while true do
-                for i = 1, 20000 do end   -- well inside a budget, every time
+                for i = 1, 1000 do end   -- well inside a budget, every time
                 coroutine.yield()
             end
         end

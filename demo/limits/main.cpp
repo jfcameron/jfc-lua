@@ -2,6 +2,7 @@
 
 #include <jfc/lua.h>
 
+#include <chrono>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -35,18 +36,19 @@ int main()
     interpreter interp(interpreter_policy{
         .MEMORY_BUDGET_IN_BYTES = 64u << 20,
         .MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN = 8u << 20,
-        .INSTRUCTION_BUDGET = 20000000,
-        .ON_INSTRUCTION_BUDGET_EXHAUSTED = [](const std::size_t aExecuted)
+        .TIME_BUDGET = std::chrono::seconds(2),
+        .ON_TIME_BUDGET_EXHAUSTED = [](const std::chrono::nanoseconds aTaken)
         {
-            std::cout << "    [limit] a script has run " << aExecuted
-                << " instructions without finishing -- stopping it\n";
+            std::cout << "    [limit] a script has run "
+                << std::chrono::duration_cast<std::chrono::milliseconds>(aTaken).count()
+                << "ms without finishing -- stopping it\n";
 
             return false;
         }});
 
     auto npc = interp.make_environment(environment_policy{
         .LIBRARY = standard_library::safe,
-        .INSTRUCTION_BUDGET = 400000});
+        .TIME_BUDGET = std::chrono::milliseconds(50)});
 
     auto bystander = interp.make_environment();
 
@@ -75,7 +77,8 @@ int main()
 
     std::cout << "  memory  bounds the lua heap, not the process. luajit compiles through its own\n"
                  "          allocator, so a trace is invisible to the ceiling\n"
-                 "  time    counts vm instructions\n"
+                 "  time    counts the script's own running: not loading it, and not a call into c++,\n"
+                 "          which it never interrupts\n"
                  "  neither is per environment: they share one lua state, so the figures bound the\n"
                  "          interpreter and the per-run one says who is at fault\n";
 

@@ -10,11 +10,7 @@
 #include <jfc/lua/userdata.h>
 #include <jfc/lua/types.h>
 
-#include <lua.hpp>
-
-#ifndef LUA_OK
-    #define LUA_OK 0
-#endif
+#include <jfc/lua/backend.h>
 
 #include <chrono>
 #include <cstddef>
@@ -31,7 +27,7 @@
 #include <utility>
 
 namespace jfc::lua {
-    /// \brief what the allocator and the instruction hook share
+    /// \brief what the allocator and the budget's check share
     struct interpreter_limits final {
         //! the allocator the state was made with
         lua_Alloc innerAlloc{nullptr};
@@ -44,11 +40,17 @@ namespace jfc::lua {
         //! ceiling on `used`, or zero for unbounded
         std::size_t cap{0};
 
-        //! instructions one outermost run may execute, or zero for unbounded
-        std::size_t instructionBudget{0};
+        //! how long one outermost run may take, or zero for unbounded
+        std::chrono::nanoseconds timeBudget{0};
 
-        //! instructions the current outermost run has executed
-        std::size_t instructionsSeen{0};
+        //! when the current outermost run began, or last was let carry on, moved on by the time c++ took for it
+        std::chrono::steady_clock::time_point runStarted{};
+
+        //! since when a registered function has been running, the clock stopped: a run's budget is its script's time
+        std::optional<std::chrono::steady_clock::time_point> pausedSince{};
+
+        //! under Luau, interrupts since the clock was last looked at
+        unsigned interrupts{0};
 
         //! bytes one outermost run may add to the heap, or zero for unbounded
         std::size_t growthCap{0};
@@ -62,7 +64,7 @@ namespace jfc::lua {
         //! registry reference to luajit's jit.off, or LUA_NOREF where there is no jit
         int jitOffReference{-2};   // LUA_NOREF
 
-        //! whether the instruction hook has been installed yet
+        //! whether the budget's check -- Lua 5.1's count hook, Luau's interrupt -- has been installed yet
         bool hookInstalled{false};
 
         //! whether allocations ignore the caps, for those nothing could catch a refusal of
@@ -71,8 +73,8 @@ namespace jfc::lua {
         //! whether this run has already been told to stop
         bool aborted{false};
 
-        //! what to do when the budget is reached; empty means stop
-        std::function<bool(const std::size_t)> onExhausted;
+        //! what to do when the budget is reached, told how long the run has taken; empty means stop
+        std::function<bool(const std::chrono::nanoseconds)> onExhausted;
 
         //! told of an error nothing was protecting against
         std::function<void(std::string_view)> onPanic;
@@ -131,7 +133,7 @@ namespace jfc::lua::detail {
     /// \brief runs aWork so that a lua error raised in it -- a metamethod's, running out of memory -- comes back as its
     /// message instead of ending the program. A std::exception aWork throws is thrown again once the call is over.
     ///
-    /// Lua's errors are c++ exceptions on both backends, so they unwind aWork's objects on their way here.
+    /// Lua's errors are c++ exceptions on every backend, so they unwind aWork's objects on their way here.
     template <typename work_type>
     [[nodiscard]] std::optional<std::string> protect(lua_State *const L, work_type &&aWork) {
         struct context final {
@@ -146,7 +148,11 @@ namespace jfc::lua::detail {
 
             // a c++ exception unwinding through PUC Lua's C frames would leave the state in pieces
             try { (*pHeld->pWork)(pState); }
-            catch (const std::exception &) { pHeld->thrown = std::current_exception(); }
+            catch (const std::exception &e) {
+                if (backend::is_lua_error(e)) throw;
+
+                pHeld->thrown = std::current_exception();
+            }
 
             return 0;
         }, &held);
@@ -163,6 +169,29 @@ namespace jfc::lua::detail {
 
         return error;
     }
+
+    /// \brief the clock of a run's time budget stopped for as long as it lives, while a registered function runs: what
+    /// c++ does for a script is not the script's time. A script run inside starts it again (budget_scope)
+    class budget_pause final {
+        jfc::lua::interpreter_limits *m_pLimits;
+
+    public:
+        budget_pause(const budget_pause &) = delete;
+        budget_pause &operator=(const budget_pause &) = delete;
+
+        explicit budget_pause(jfc::lua::interpreter_limits *const pLimits)
+        : m_pLimits(pLimits && pLimits->depth > 0 && pLimits->timeBudget.count() > 0 && !pLimits->pausedSince
+            ? pLimits : nullptr) {
+            if (m_pLimits) m_pLimits->pausedSince = std::chrono::steady_clock::now();
+        }
+
+        ~budget_pause() {
+            if (!m_pLimits || !m_pLimits->pausedSince) return;
+
+            m_pLimits->runStarted += std::chrono::steady_clock::now() - *m_pLimits->pausedSince;
+            m_pLimits->pausedSince.reset();
+        }
+    };
 
     /// \brief a script's call into c++: aWork runs, and the call timer hears of it under aName. Returns what aWork does,
     /// how many results it pushed.
@@ -181,7 +210,10 @@ namespace jfc::lua::detail {
 
             lua_getallocf(L, &ud);
 
-            const auto *const pLimits = static_cast<const interpreter_limits *>(ud);
+            auto *const pLimits = static_cast<interpreter_limits *>(ud);
+
+            const budget_pause pause(pLimits);
+
             const bool timed = pLimits && pLimits->callTimer;
             const auto began = timed ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
 
@@ -190,12 +222,14 @@ namespace jfc::lua::detail {
             if (timed) pLimits->callTimer(aName, std::chrono::steady_clock::now() - began);
         }
         catch (const std::exception &e) {
+            if (backend::is_lua_error(e)) throw;
+
             std::snprintf(failure, sizeof failure, "%s", e.what());
 
             failed = true;
         }
 
-        if (failed) return luaL_error(L, "%s", failure);
+        if (failed) return JFC_LUA_RAISE(L, "%s", failure);
 
         return results;
     }
@@ -269,20 +303,23 @@ namespace {
         ~unbudgeted_scope() { if (m_pLimits) m_pLimits->unbudgeted = m_Outer; }
     };
 
-    /// \brief one outermost run's share of the instruction and memory budgets
+    /// \brief one outermost run's share of the time and memory budgets. One inside a registered function starts the
+    /// clock that function stopped again, until it ends
     class budget_scope final {
         jfc::lua::interpreter_limits *m_pLimits;
-        std::size_t m_OutermostBudget;
+        std::chrono::nanoseconds m_OutermostBudget;
         bool m_Outermost;
+        bool m_Restarted;
 
     public:
         budget_scope(const budget_scope &) = delete;
         budget_scope &operator=(const budget_scope &) = delete;
 
-        budget_scope(lua_State *const aState, const std::optional<std::size_t> aBudgetOverride)
+        budget_scope(lua_State *const aState, const std::optional<std::chrono::nanoseconds> aBudgetOverride)
         : m_pLimits(nullptr)
         , m_OutermostBudget(0)
-        , m_Outermost(false) {
+        , m_Outermost(false)
+        , m_Restarted(false) {
             void *ud = nullptr;
 
             lua_getallocf(aState, &ud);
@@ -293,15 +330,25 @@ namespace {
 
             m_Outermost = m_pLimits->depth++ == 0;
 
-            if (!m_Outermost) return;
+            if (!m_Outermost) {
+                if (!m_pLimits->pausedSince) return;
 
-            m_pLimits->instructionsSeen = 0;
+                m_pLimits->runStarted += std::chrono::steady_clock::now() - *m_pLimits->pausedSince;
+                m_pLimits->pausedSince.reset();
+
+                m_Restarted = true;
+
+                return;
+            }
+
+            m_pLimits->pausedSince.reset();
+            m_pLimits->runStarted = std::chrono::steady_clock::now();
             m_pLimits->aborted = false;
             m_pLimits->usedAtRunStart = m_pLimits->used;
 
-            m_OutermostBudget = m_pLimits->instructionBudget;
+            m_OutermostBudget = m_pLimits->timeBudget;
 
-            if (aBudgetOverride) m_pLimits->instructionBudget = *aBudgetOverride;
+            if (aBudgetOverride) m_pLimits->timeBudget = *aBudgetOverride;
         }
 
         ~budget_scope() {
@@ -309,13 +356,15 @@ namespace {
 
             --m_pLimits->depth;
 
-            if (m_Outermost) m_pLimits->instructionBudget = m_OutermostBudget;
+            if (m_Restarted) m_pLimits->pausedSince = std::chrono::steady_clock::now();
+
+            if (m_Outermost) m_pLimits->timeBudget = m_OutermostBudget;
         }
 
         [[nodiscard]] bool aborted() const { return m_pLimits && m_pLimits->aborted; }
 
-        [[nodiscard]] std::size_t instruction_budget() const
-            { return m_pLimits ? m_pLimits->instructionBudget : 0; }
+        [[nodiscard]] std::chrono::nanoseconds time_budget() const
+            { return m_pLimits ? m_pLimits->timeBudget : std::chrono::nanoseconds(0); }
 
         [[nodiscard]] jfc::lua::interpreter_limits *limits() const { return m_pLimits; }
     };

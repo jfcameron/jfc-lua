@@ -24,6 +24,7 @@ jfc_add_tests(
         "${CMAKE_CURRENT_LIST_DIR}/protected_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/reference_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/registered_test.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/script_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/stack_balance_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/table_reader_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/table_view_test.cpp"
@@ -37,3 +38,6 @@ jfc_add_tests(
     LIBRARIES
         jfclua
 )
+
+# glibc fills what malloc gives and takes with a pattern, so an object destroyed that was never made is a crash
+set_property(TEST jfclua_test_0 APPEND PROPERTY ENVIRONMENT "MALLOC_PERTURB_=165")

@@ -4,9 +4,12 @@
 
 #include <jfc/lua.h>
 
+#include <chrono>
+
 #include <string>
 
 using namespace jfc::lua;
+using namespace std::chrono_literals;
 
 TEST_CASE("a reference can be taken to any kind of value", "[reference]") {
     interpreter interp;
@@ -154,7 +157,7 @@ TEST_CASE("a reference keeps what it refers to, and its interpreter, alive", "[r
         const auto held = env->read_reference("doomed");
 
         REQUIRE_FALSE(env->run("doomed = nil").has_value());
-        REQUIRE_FALSE(interp.run("collectgarbage('collect')").has_value());
+        interp.collect_garbage();
 
         REQUIRE(held->is_table());
     }
@@ -281,8 +284,8 @@ TEST_CASE("calling a reference reports what went wrong", "[reference][call]") {
         interpreter budgeted(interpreter_policy{
             .MEMORY_BUDGET_IN_BYTES = 0,
             .MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN = 0,
-            .INSTRUCTION_BUDGET = 200000,
-            .ON_INSTRUCTION_BUDGET_EXHAUSTED = [&](const std::size_t)
+            .TIME_BUDGET = 40ms,
+            .ON_TIME_BUDGET_EXHAUSTED = [&](const std::chrono::nanoseconds)
             {
                 ++aborts;
 
@@ -303,14 +306,14 @@ TEST_CASE("calling a reference reports what went wrong", "[reference][call]") {
         REQUIRE(aborts == 0);
     }
 
-    SECTION("the interpreter's instruction budget still applies") {
+    SECTION("the interpreter's time budget still applies") {
         bool reacted = false;
 
         interpreter budgeted(interpreter_policy{
             .MEMORY_BUDGET_IN_BYTES = 0,
             .MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN = 0,
-            .INSTRUCTION_BUDGET = 100000,
-            .ON_INSTRUCTION_BUDGET_EXHAUSTED = [&](const std::size_t)
+            .TIME_BUDGET = 20ms,
+            .ON_TIME_BUDGET_EXHAUSTED = [&](const std::chrono::nanoseconds)
             {
                 reacted = true;
                 return false;

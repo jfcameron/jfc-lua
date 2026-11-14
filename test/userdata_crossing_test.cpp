@@ -71,7 +71,7 @@ TEST_CASE("a c++ object can be handed to a script and read back", "[userdata][cr
         auto unrestricted = interp.make_environment(
             environment_policy{standard_library::unrestricted});
 
-        REQUIRE_FALSE(unrestricted->run("handle = io.tmpfile()").has_value());
+        REQUIRE_FALSE(unrestricted->run("handle = newproxy(true)").has_value());
         REQUIRE_FALSE(unrestricted->run("kind = type(handle)").has_value());
 
         REQUIRE(unrestricted->read_string("kind") == "userdata");
@@ -182,7 +182,7 @@ TEST_CASE("ownership is shared across the barrier", "[userdata][crossing]") {
 
         REQUIRE_FALSE(env->run("thing = nil").has_value());
 
-        REQUIRE_FALSE(interp.run("collectgarbage('collect')").has_value());
+        interp.collect_garbage();
 
         REQUIRE(destroyed == 0);
         REQUIRE(original->hp == 2);
@@ -202,7 +202,7 @@ TEST_CASE("ownership is shared across the barrier", "[userdata][crossing]") {
         REQUIRE(destroyed == 0);
 
         REQUIRE_FALSE(env->run("thing = nil").has_value());
-        REQUIRE_FALSE(interp.run("collectgarbage('collect')").has_value());
+        interp.collect_garbage();
 
         REQUIRE(destroyed == 1);
     }
@@ -312,7 +312,7 @@ TEST_CASE("somebody else's userdata does not cross in a call", "[userdata][cross
 
     env->register_function("takes", [](value_list_type) -> value_list_type { return {}; });
 
-    REQUIRE_FALSE(env->run("handle = io.tmpfile()").has_value());
+    REQUIRE_FALSE(env->run("handle = newproxy(true)").has_value());
 
     const auto error = env->run("takes(handle)");
 

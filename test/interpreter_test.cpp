@@ -5,6 +5,9 @@
 
 #include <jfc/lua.h>
 
+#include <string>
+#include <vector>
+
 using namespace jfc::lua;
 
 /*static const std::string script((R"V0G0N(
@@ -45,3 +48,20 @@ TEST_CASE("integer boundary constants and negative table keys remain valid", "[j
     REQUIRE_FALSE(error.has_value());
 }
 
+#if defined(JFC_LUA_LUAJIT) || defined(JFC_LUA_LUAU)
+TEST_CASE("random numbers start the same in every interpreter until a script seeds them", "[jfc::lua::interpreter]") {
+    const auto draws = [](const std::string &aFirst) {
+        interpreter lua;
+
+        auto env = lua.make_environment();
+
+        REQUIRE_FALSE(env->run(aFirst + " a, b, c = math.random(1, 1000000), math.random(1, 1000000), math.random()"));
+
+        return std::vector<double>{*env->read_number("a"), *env->read_number("b"), *env->read_number("c")};
+    };
+
+    REQUIRE(draws("") == draws(""));
+    REQUIRE(draws("math.randomseed(7)") == draws("math.randomseed(7)"));
+    REQUIRE(draws("math.randomseed(7)") != draws(""));
+}
+#endif

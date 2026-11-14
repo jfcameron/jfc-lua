@@ -93,6 +93,36 @@
       }
     },
     {
+      "name": "linux-gcc-luau",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++",
+        "CMAKE_CXX_FLAGS": "-Wall -Wextra",
+        "JFC_LUA_BACKEND": "luau"
+      }
+    },
+    {
+      "name": "linux-clang-luau",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_CXX_FLAGS": "-Wall -Wextra",
+        "JFC_LUA_BACKEND": "luau"
+      }
+    },
+    {
+      "name": "linux-gcc-luau-bench",
+      "displayName": "Linux / gcc / luau / bench",
+      "description": "the benchmark harness on Luau",
+      "inherits": "linux-gcc-luau",
+      "cacheVariables": {
+        "JFCLUA_BUILD_BENCH": "ON",
+        "JFCLUA_BUILD_TESTS": "OFF"
+      }
+    },
+    {
       "name": "macos-clang",
       "displayName": "macOS / clang / libc++",
       "inherits": "base",
@@ -417,6 +447,39 @@
         "lhs": "${hostSystemName}",
         "rhs": "Linux"
       }
+    },
+    {
+      "name": "linux-gcc-luau",
+      "configurePreset": "linux-gcc-luau",
+      "targets": [
+        "jfclua",
+        "jfclua_test_0"
+      ],
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-clang-luau",
+      "configurePreset": "linux-clang-luau",
+      "targets": [
+        "jfclua",
+        "jfclua_test_0"
+      ],
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-gcc-luau-bench",
+      "configurePreset": "linux-gcc-luau-bench",
+      "targets": [
+        "jfclua_bench"
+      ]
     }
   ],
   "testPresets": [
@@ -555,6 +618,40 @@
     {
       "name": "linux-clang-asan",
       "configurePreset": "linux-clang-asan",
+      "filter": {
+        "include": {
+          "name": "jfclua_test_0"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-gcc-luau",
+      "configurePreset": "linux-gcc-luau",
+      "filter": {
+        "include": {
+          "name": "jfclua_test_0"
+        }
+      },
+      "output": {
+        "outputOnFailure": true
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      }
+    },
+    {
+      "name": "linux-clang-luau",
+      "configurePreset": "linux-clang-luau",
       "filter": {
         "include": {
           "name": "jfclua_test_0"

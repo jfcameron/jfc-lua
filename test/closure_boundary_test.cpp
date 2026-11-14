@@ -132,6 +132,56 @@ TEST_CASE("the interpreter survives, and keeps working", "[closure]") {
     REQUIRE(bystander->read_number("hp") == 100);
 }
 
+namespace {
+    bool refuseCopies = false;
+    int alive = 0;
+
+    struct copy_counted final {
+        copy_counted() { ++alive; }
+
+        copy_counted(const copy_counted &) {
+            if (refuseCopies) throw std::runtime_error("no more copies");
+
+            ++alive;
+        }
+
+        copy_counted(copy_counted &&) noexcept { ++alive; }
+
+        copy_counted &operator=(const copy_counted &) = delete;
+        copy_counted &operator=(copy_counted &&) = delete;
+
+        ~copy_counted() { --alive; }
+
+        value_list_type operator()(const value_list_type &) const { return {}; }
+    };
+}
+
+TEST_CASE("a closure that throws on its way in leaves nothing to destroy", "[closure]") {
+    {
+        interpreter interp;
+
+        auto env = interp.make_environment();
+
+        for (int i = 0; i < 2; ++i) env->register_function("counted", environment::closure_type(copy_counted{}));
+
+        interp.collect_garbage();
+
+        environment::closure_type refused(copy_counted{});
+
+        refuseCopies = true;
+
+        REQUIRE_THROWS_WITH(env->register_function("counted", std::move(refused)), "no more copies");
+
+        refuseCopies = false;
+
+        interp.collect_garbage();
+
+        REQUIRE_FALSE(env->run("counted()").has_value());
+    }
+
+    REQUIRE(alive == 0);
+}
+
 TEST_CASE("the ordinary path is untouched", "[closure]") {
     interpreter interp;
 

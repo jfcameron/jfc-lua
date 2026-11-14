@@ -12,7 +12,6 @@
 
 #include <cstring>
 #include <functional>
-#include <new>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -184,9 +183,9 @@ namespace {
 
 namespace jfc::lua {
     environment::environment(std::shared_ptr<lua_State> aState, const int aRootReference,
-        const std::optional<std::size_t> aInstructionBudget, std::string aName)
+        const std::optional<std::chrono::nanoseconds> aTimeBudget, std::string aName)
     : reference(std::move(aState), aRootReference)
-    , m_InstructionBudget(aInstructionBudget)
+    , m_TimeBudget(aTimeBudget)
     , m_Name(std::move(aName))
     {}
 
@@ -414,7 +413,7 @@ namespace jfc::lua {
 
         [[nodiscard]] auto _push_list(lua_State *const L, const value_list_type &aArguments) {
             return [L, &aArguments](int) {
-                if (!lua_checkstack(L, static_cast<int>(aArguments.size()) + 2))
+                if (!backend::check_stack(L, static_cast<int>(aArguments.size()) + 2))
                     throw exception("the lua stack cannot grow enough to make this call");
 
                 for (const auto &argument : aArguments) jfc::lua::detail::push_param(L, argument);
@@ -481,9 +480,9 @@ namespace jfc::lua {
 
         const stack_guard guard(L);
         const root_scope root(L, registry_reference());
-        const budget_scope budget(L, m_InstructionBudget);
+        const budget_scope budget(L, m_TimeBudget);
 
-        if (budget.aborted()) return "script exceeded its instruction budget";
+        if (budget.aborted()) return "script exceeded its time budget";
 
         aResults.clear();
 
@@ -505,9 +504,9 @@ namespace jfc::lua {
 
         const stack_guard guard(L);
         const root_scope root(L, registry_reference());
-        const budget_scope budget(L, m_InstructionBudget);
+        const budget_scope budget(L, m_TimeBudget);
 
-        if (budget.aborted()) return "script exceeded its instruction budget";
+        if (budget.aborted()) return "script exceeded its time budget";
 
         const auto what = [&aPath] { return _name_of(aPath); };
 
@@ -522,14 +521,14 @@ namespace jfc::lua {
         { return _call(aArguments, aResults, {}); }
 
     error_type reference::_call(const value_list_type &aArguments, value_list_type &aResults,
-        const std::optional<std::size_t> aInstructionBudget) {
+        const std::optional<std::chrono::nanoseconds> aTimeBudget) {
         auto *L = state();
 
         const stack_guard guard(L);
 
-        const budget_scope budget(L, aInstructionBudget);
+        const budget_scope budget(L, aTimeBudget);
 
-        if (budget.aborted()) return "script exceeded its instruction budget";
+        if (budget.aborted()) return "script exceeded its time budget";
 
         aResults.clear();
 
@@ -547,14 +546,14 @@ namespace jfc::lua {
     }
 
     error_type reference::_call(const detail::stack_work &aPush, const detail::stack_work &aRead,
-        const std::optional<std::size_t> aInstructionBudget) {
+        const std::optional<std::chrono::nanoseconds> aTimeBudget) {
         auto *L = state();
 
         const stack_guard guard(L);
 
-        const budget_scope budget(L, aInstructionBudget);
+        const budget_scope budget(L, aTimeBudget);
 
-        if (budget.aborted()) return "script exceeded its instruction budget";
+        if (budget.aborted()) return "script exceeded its time budget";
 
         const auto what = [] { return std::string("the reference"); };
 
@@ -589,7 +588,7 @@ namespace jfc::lua {
 
             lua_pushvalue(L, -1);
 
-            val = reference(m_pState, luaL_ref(L, LUA_REGISTRYINDEX));
+            val = reference(m_pState, backend::ref(L));
         })) return {};
 
         return val;
@@ -641,7 +640,7 @@ namespace jfc::lua {
 
             lua_pop(pState, 1);
 
-            if (mainThread) return luaL_error(pState, "%s", "this function waits, and only a "
+            if (mainThread) return JFC_LUA_RAISE(pState, "%s", "this function waits, and only a "
                 "coroutine can wait: call it from one, not from a plain call or run");
 
             return lua_yield(pState, _closure_trampoline(pState));
@@ -674,22 +673,20 @@ namespace jfc::lua {
         const auto name = where.str();
 
         _protected_write(L, registry_reference(), aName, [&]() {
-            auto *const pStorage = static_cast<registered_closure *>(lua_newuserdata(L, sizeof(registered_closure)));
-
-            new (pStorage) registered_closure{aClosure, name};
+            backend::new_userdata(L, registered_closure{aClosure, name});
 
             if (luaL_newmetatable(L, "jfc.lua.closure")) {
-                lua_pushcfunction(L, [](lua_State *pState) {
+                backend::push_function(L, [](lua_State *pState) {
                     static_cast<registered_closure *>(lua_touserdata(pState, 1))->~registered_closure();
                     return 0;
-                });
+                }, "jfc.lua.closure.__gc");
 
                 lua_setfield(L, -2, "__gc");
             }
 
             lua_setmetatable(L, -2);
 
-            lua_pushcclosure(L, trampoline, 1);
+            backend::push_closure(L, trampoline, "jfc.lua.function", 1);
         });
 
         if (m_Name.empty()) return;
@@ -718,7 +715,7 @@ namespace jfc::lua {
             lua_pushvalue(L, -2);
             lua_xmove(L, pThread, 1);
 
-            thread = reference(m_pState, luaL_ref(L, LUA_REGISTRYINDEX));
+            thread = reference(m_pState, backend::ref(L));
         })) {
             std::ostringstream where;
 
@@ -729,38 +726,43 @@ namespace jfc::lua {
 
         if (!thread) return {};
 
-        return coroutine(std::move(*thread), m_InstructionBudget);
+        return coroutine(std::move(*thread), m_TimeBudget);
     }
 
     namespace {
-        /// \brief loads aLuaScript as luaL_loadstring does, calling it aName if it has one
-        [[nodiscard]] int _load(lua_State *const L, const std::string &aLuaScript, const std::string_view aName) {
-            if (aName.empty()) return luaL_loadstring(L, aLuaScript.c_str());
+        //! the chunk aLoad pushes, run against aRoot within aBudget, which loading it does not spend
+        template <typename load_type>
+        [[nodiscard]] environment::error_type _run(lua_State *const L, const int aRoot,
+            const std::optional<std::chrono::nanoseconds> aBudget, load_type &&aLoad) {
+            const stack_guard guard(L);
+            const root_scope root(L, aRoot);
 
-            const std::string chunkName = "@" + std::string(aName);
+            if (aLoad() != LUA_OK) return _to_string(L, -1).value_or("lua reported an error it could not describe");
 
-            return luaL_loadbuffer(L, aLuaScript.c_str(), std::strlen(aLuaScript.c_str()), chunkName.c_str());
+            const budget_scope budget(L, aBudget);
+
+            if (budget.aborted()) return "script exceeded its time budget";
+
+            if (budget.time_budget().count()) _disable_jit_for_chunk(L, budget.limits());
+
+            if (lua_pcall(L, 0, 0, 0) != LUA_OK)
+                return _to_string(L, -1).value_or("lua reported an error it could not describe");
+
+            return {};
         }
     }
 
     environment::error_type environment::run(const std::string &aLuaScript, const std::string_view aName) {
-        auto *L = state();
+        auto *const L = state();
 
-        const stack_guard guard(L);
-        const root_scope root(L, registry_reference());
-        const budget_scope budget(L, m_InstructionBudget);
+        return _run(L, registry_reference(), m_TimeBudget, [&] { return backend::load(L, aLuaScript, aName); });
+    }
 
-        if (budget.aborted()) return "script exceeded its instruction budget";
+    environment::error_type environment::run(const script &aScript) {
+        auto *const L = state();
 
-        if (_load(L, aLuaScript, aName) != LUA_OK)
-            return _to_string(L, -1).value_or("lua reported an error it could not describe");
-
-        if (budget.instruction_budget()) _disable_jit_for_chunk(L, budget.limits());
-
-        if (lua_pcall(L, 0, 0, 0) != LUA_OK)
-            return _to_string(L, -1).value_or("lua reported an error it could not describe");
-
-        return {};
+        return _run(L, registry_reference(), m_TimeBudget,
+            [&] { return backend::load_compiled(L, aScript.m_Compiled, aScript.m_ChunkName); });
     }
 
     environment::error_type environment::validate_syntax(const std::string &aLuaScript, const std::string_view aName) const {
@@ -769,7 +771,7 @@ namespace jfc::lua {
         const stack_guard guard(L);
         const root_scope root(L, registry_reference());
 
-        if (_load(L, aLuaScript, aName) == LUA_OK) return {};
+        if (backend::load(L, aLuaScript, aName) == LUA_OK) return {};
 
         return _to_string(L, -1).value_or("lua reported an error it could not describe");
     }

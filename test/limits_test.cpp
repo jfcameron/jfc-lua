@@ -4,12 +4,17 @@
 
 #include <jfc/lua.h>
 
+#include <chrono>
+
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 using namespace jfc::lua;
+using namespace std::chrono_literals;
 
 TEST_CASE("a memory budget bounds what a script can allocate", "[limits]") {
     interpreter interp(interpreter_policy{8u << 20});
@@ -52,11 +57,11 @@ TEST_CASE("no memory budget means no ceiling", "[limits]") {
     REQUIRE(env->read_number("length") == 50000000);
 }
 
-TEST_CASE("an instruction budget interrupts a runaway script", "[limits]") {
+TEST_CASE("a time budget interrupts a runaway script", "[limits]") {
     interpreter interp(interpreter_policy{
         0,     // MEMORY_BUDGET_IN_BYTES
         0,     // MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN
-        100000 // INSTRUCTION_BUDGET
+        20ms // TIME_BUDGET
     });
 
     auto env = interp.make_environment();
@@ -65,7 +70,7 @@ TEST_CASE("an instruction budget interrupts a runaway script", "[limits]") {
         const auto error = env->run("while true do end");
 
         REQUIRE(error.has_value());
-        REQUIRE(error->find("instruction budget") != std::string::npos);
+        REQUIRE(error->find("time budget") != std::string::npos);
     }
 
     SECTION("so is one that allocates nothing and calls nothing") {
@@ -110,8 +115,8 @@ TEST_CASE("an interpreter lets go of its limits when it goes", "[limits]") {
         interpreter interp(interpreter_policy{
             0,                                      // MEMORY_BUDGET_IN_BYTES
             0,                                      // MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN
-            0,                                      // INSTRUCTION_BUDGET
-            [owned](const std::size_t) { return false; }  // ON_INSTRUCTION_BUDGET_EXHAUSTED
+            0ns,                                      // TIME_BUDGET
+            [owned](const std::chrono::nanoseconds) { return false; }  // ON_TIME_BUDGET_EXHAUSTED
         });
 
         REQUIRE(owned.use_count() > 1);
@@ -122,17 +127,17 @@ TEST_CASE("an interpreter lets go of its limits when it goes", "[limits]") {
 
 TEST_CASE("the callback decides what happens at the budget", "[limits]") {
     SECTION("returning false stops the script, and reports how far it got") {
-        std::size_t reportedAt = 0;
+        std::chrono::nanoseconds reportedAt{0};
         int calls = 0;
 
         interpreter interp(interpreter_policy{
             0,                                   // MEMORY_BUDGET_IN_BYTES
             0,                                   // MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN
-            50000,                               // INSTRUCTION_BUDGET
-            [&](const std::size_t aExecuted)     // ON_INSTRUCTION_BUDGET_EXHAUSTED
+            10ms,                               // TIME_BUDGET
+            [&](const std::chrono::nanoseconds aTaken)     // ON_TIME_BUDGET_EXHAUSTED
             {
                 ++calls;
-                reportedAt = aExecuted;
+                reportedAt = aTaken;
 
                 return false;
             }
@@ -143,7 +148,7 @@ TEST_CASE("the callback decides what happens at the budget", "[limits]") {
         REQUIRE(env->run("while true do end").has_value());
 
         REQUIRE(calls == 1);
-        REQUIRE(reportedAt > 50000);
+        REQUIRE(reportedAt > 10ms);
     }
 
     SECTION("returning true grants another budget, so a caller can wait as long as it likes") {
@@ -152,8 +157,8 @@ TEST_CASE("the callback decides what happens at the budget", "[limits]") {
         interpreter interp(interpreter_policy{
             0,                              // MEMORY_BUDGET_IN_BYTES
             0,                              // MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN
-            50000,                          // INSTRUCTION_BUDGET
-            [&calls](const std::size_t)     // ON_INSTRUCTION_BUDGET_EXHAUSTED
+            10ms,                          // TIME_BUDGET
+            [&calls](const std::chrono::nanoseconds)     // ON_TIME_BUDGET_EXHAUSTED
             {
                 // three reprieves, then stop -- what a "still working, keep waiting?" prompt does
                 return ++calls < 3;
@@ -173,8 +178,8 @@ TEST_CASE("the callback decides what happens at the budget", "[limits]") {
         interpreter interp(interpreter_policy{
             0,                                                       // MEMORY_BUDGET_IN_BYTES
             0,                                                       // MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN
-            1000000,                                                 // INSTRUCTION_BUDGET
-            [&calls](const std::size_t) { ++calls; return false; }  // ON_INSTRUCTION_BUDGET_EXHAUSTED
+            1s,                                                 // TIME_BUDGET
+            [&calls](const std::chrono::nanoseconds) { ++calls; return false; }  // ON_TIME_BUDGET_EXHAUSTED
         });
 
         auto env = interp.make_environment();
@@ -189,8 +194,8 @@ TEST_CASE("the callback decides what happens at the budget", "[limits]") {
         interpreter interp(interpreter_policy{
             0,                                // MEMORY_BUDGET_IN_BYTES
             0,                                // MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN
-            50000,                            // INSTRUCTION_BUDGET
-            [](const std::size_t) -> bool        // ON_INSTRUCTION_BUDGET_EXHAUSTED
+            10ms,                            // TIME_BUDGET
+            [](const std::chrono::nanoseconds) -> bool        // ON_TIME_BUDGET_EXHAUSTED
             {
                 throw std::runtime_error("from inside the callback");
             }
@@ -212,7 +217,7 @@ TEST_CASE("a nested run does not refill the caller's budget", "[limits]") {
     interpreter interp(interpreter_policy{
         0,       // MEMORY_BUDGET_IN_BYTES
         0,       // MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN
-        200000  // INSTRUCTION_BUDGET
+        40ms  // TIME_BUDGET
     });
 
     auto outer = interp.make_environment();
@@ -232,7 +237,7 @@ TEST_CASE("a nested run does not refill the caller's budget", "[limits]") {
     const auto error = outer->run("while true do tick() end");
 
     REQUIRE(error.has_value());
-    REQUIRE(error->find("instruction budget") != std::string::npos);
+    REQUIRE(error->find("time budget") != std::string::npos);
 
     // The inner environment really was being entered, so a reset of the outer count had every
     // opportunity to happen and did not.
@@ -264,8 +269,8 @@ TEST_CASE("a caller that says stop is asked once", "[limits]") {
     interpreter interp(interpreter_policy{
         0,                                                       // MEMORY_BUDGET_IN_BYTES
         0,                                                       // MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN
-        100000,                                                  // INSTRUCTION_BUDGET
-        [&calls](const std::size_t) { ++calls; return false; }  // ON_INSTRUCTION_BUDGET_EXHAUSTED
+        20ms,                                                  // TIME_BUDGET
+        [&calls](const std::chrono::nanoseconds) { ++calls; return false; }  // ON_TIME_BUDGET_EXHAUSTED
     });
 
     auto outer = interp.make_environment();
@@ -287,24 +292,24 @@ TEST_CASE("the two budgets are independent", "[limits]") {
         interpreter interp(interpreter_policy{
             8u << 20,  // MEMORY_BUDGET_IN_BYTES
             0,         // MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN
-            200000    // INSTRUCTION_BUDGET
+            40ms    // TIME_BUDGET
         });
 
         auto env = interp.make_environment();
 
-        // allocates nothing, so only the instruction budget can stop it
+        // allocates nothing, so only the time budget can stop it
         const auto error = env->run("local i = 0 while true do i = i + 1 end");
 
         REQUIRE(error.has_value());
-        REQUIRE(error->find("instruction budget") != std::string::npos);
+        REQUIRE(error->find("time budget") != std::string::npos);
     }
 
-    SECTION("an instruction budget does not bound memory") {
-        // one c call, so no vm instructions run inside it and the hook cannot fire
+    SECTION("a time budget does not bound memory") {
+        // one c call, which no look at the clock interrupts
         interpreter interp(interpreter_policy{
             8u << 20,   // MEMORY_BUDGET_IN_BYTES
             0,          // MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN
-            100000000  // INSTRUCTION_BUDGET
+            60s  // TIME_BUDGET
         });
 
         auto env = interp.make_environment();
@@ -379,17 +384,17 @@ TEST_CASE("a per-run growth budget localises a runaway allocation", "[limits]") 
     }
 }
 
-TEST_CASE("an environment can carry its own instruction budget", "[limits]") {
+TEST_CASE("an environment can carry its own time budget", "[limits]") {
     SECTION("a tight environment is stopped where a generous one is not") {
         interpreter interp;
 
         auto npc = interp.make_environment(environment_policy{
             standard_library::safe,  // LIBRARY
-            50000                   // INSTRUCTION_BUDGET
+            10ms                   // TIME_BUDGET
         });
         auto loader = interp.make_environment(environment_policy{
             standard_library::safe,  // LIBRARY
-            100000000               // INSTRUCTION_BUDGET
+            60s               // TIME_BUDGET
         });
 
         REQUIRE(npc->run("local i = 0 while i < 1e9 do i = i + 1 end").has_value());
@@ -403,7 +408,7 @@ TEST_CASE("an environment can carry its own instruction budget", "[limits]") {
         interpreter interp(interpreter_policy{
             0,      // MEMORY_BUDGET_IN_BYTES
             0,      // MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN
-            50000  // INSTRUCTION_BUDGET
+            10ms  // TIME_BUDGET
         });
 
         auto inherited = interp.make_environment();
@@ -415,12 +420,12 @@ TEST_CASE("an environment can carry its own instruction budget", "[limits]") {
         interpreter interp(interpreter_policy{
             0,      // MEMORY_BUDGET_IN_BYTES
             0,      // MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN
-            50000  // INSTRUCTION_BUDGET
+            10ms  // TIME_BUDGET
         });
 
         auto allowed = interp.make_environment(environment_policy{
             standard_library::safe,  // LIBRARY
-            0                       // INSTRUCTION_BUDGET
+            0ns                       // TIME_BUDGET
             });   // 0 means unbounded here
 
             REQUIRE_FALSE(allowed->run("local i = 0 while i < 500000 do i = i + 1 end  done = true")
@@ -430,13 +435,13 @@ TEST_CASE("an environment can carry its own instruction budget", "[limits]") {
 
             SECTION("an interpreter with no budget still honours an environment that asks for one")
             {
-            // The hook has to appear when the environment is made rather than when the interpreter was.
+            // The check has to appear when the environment is made rather than when the interpreter was.
             interpreter interp;
 
             auto unbounded = interp.make_environment();
             auto bounded = interp.make_environment(environment_policy{
             standard_library::safe,  // LIBRARY
-            50000                   // INSTRUCTION_BUDGET
+            10ms                   // TIME_BUDGET
         });
 
         REQUIRE(bounded->run("while true do end").has_value());
@@ -451,28 +456,28 @@ TEST_CASE("an environment can carry its own instruction budget", "[limits]") {
 
         auto env = interp.make_environment(environment_policy{
             standard_library::unrestricted,  // LIBRARY
-            50000                           // INSTRUCTION_BUDGET
+            10ms                           // TIME_BUDGET
         });
 
-        REQUIRE_FALSE(env->run("probe = tostring(io)").has_value());
+        REQUIRE_FALSE(env->run("probe = tostring(debug)").has_value());
         REQUIRE(env->read_string("probe") != "nil");
 
         REQUIRE(env->run("while true do end").has_value());
     }
 }
 
-TEST_CASE("the outermost run's instruction budget governs a nested one", "[limits]") {
+TEST_CASE("the outermost run's time budget governs a nested one", "[limits]") {
     // The script being measured is the one that has been running, not the one it called into. A tight
     // npc calling a generous loader must not inherit the loader's allowance for its own loop.
     interpreter interp;
 
     auto npc = interp.make_environment(environment_policy{
         standard_library::safe,  // LIBRARY
-        100000                  // INSTRUCTION_BUDGET
+        20ms                  // TIME_BUDGET
     });
     auto loader = interp.make_environment(environment_policy{
         standard_library::safe,  // LIBRARY
-        100000000               // INSTRUCTION_BUDGET
+        60s               // TIME_BUDGET
     });
 
     int served = 0;
@@ -493,7 +498,7 @@ TEST_CASE("a budgeted environment does not cost the rest of the state its jit", 
     interpreter interp(interpreter_policy{
         0,        // MEMORY_BUDGET_IN_BYTES
         0,        // MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN
-        100000    // INSTRUCTION_BUDGET
+        20ms    // TIME_BUDGET
     });
 
     auto budgeted = interp.make_environment();
@@ -510,3 +515,70 @@ TEST_CASE("a budgeted environment does not cost the rest of the state its jit", 
     REQUIRE(observer->read_boolean("after") == true);
 }
 #endif
+
+TEST_CASE("a run's time budget is its script's own: the clock stops while a registered function runs", "[limits]") {
+    interpreter lua;
+
+    auto env = lua.make_environment(environment_policy{standard_library::safe, 20ms});
+
+    env->register_function("slow", [] { std::this_thread::sleep_for(50ms); });
+
+    SECTION("so a slow registered function does not spend it") {
+        REQUIRE_FALSE(env->run("slow() for i = 1, 5000 do end"));
+    }
+
+    SECTION("a loop of the script's own after one still does") {
+        const auto error = env->run("slow() while true do end");
+
+        REQUIRE(error);
+        REQUIRE_THAT(*error, Catch::Matchers::Contains("time budget"));
+    }
+
+    SECTION("and so does a script it runs") {
+        auto inner = lua.make_environment();
+
+        std::optional<std::string> stopped;
+
+        env->register_function("spin", [&] {
+            std::this_thread::sleep_for(50ms);
+
+            stopped = inner->run("while true do end");
+        });
+
+        static_cast<void>(env->run("spin()"));
+
+        REQUIRE(stopped);
+        REQUIRE_THAT(*stopped, Catch::Matchers::Contains("time budget"));
+    }
+}
+
+TEST_CASE("loading a script does not spend its time budget: only running it does", "[limits]") {
+    interpreter lua;
+
+    std::string body;
+
+    for (int n = 0; n < 1000; ++n) body += "x = 1 ";
+
+    std::string source;
+
+    for (int n = 0; n < 500; ++n) source += "do local function never() " + body + "end end\n";
+
+    source += "for i = 1, 10000 do end";
+
+    const auto began = std::chrono::steady_clock::now();
+
+    REQUIRE_FALSE(lua.validate_syntax(source));
+
+    const auto loading = std::chrono::steady_clock::now() - began;
+
+    if (loading < 20ms) {
+        WARN("loading took under 20 ms here, too quick to tell it apart from running: nothing to check");
+
+        return;
+    }
+
+    auto env = lua.make_environment(environment_policy{standard_library::safe,
+        std::chrono::duration_cast<std::chrono::nanoseconds>(loading / 2)});
+
+    REQUIRE_FALSE(env->run(source));
+}

@@ -15,6 +15,7 @@
 #include <variant>
 
 using namespace jfc::lua;
+using namespace std::chrono_literals;
 
 namespace {
     struct label final {
@@ -293,13 +294,13 @@ TEST_CASE("a function given to a method keeps the budget of the script that gave
         held = std::move(aFunction);
     }));
 
-    auto env = lua.make_environment(environment_policy{standard_library::safe, 1000});
+    auto env = lua.make_environment(environment_policy{standard_library::safe, 100ms});
 
     env->write("greeting", std::make_shared<label>());
 
     REQUIRE_FALSE(env->run(R"(
         greeting:later(function()
-            for i = 1, 10000000 do end
+            while true do end
         end)
     )"));
 

@@ -6,6 +6,7 @@
 #include <jfc/lua/reference.h>
 #include <jfc/lua/types.h>
 
+#include <chrono>
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -37,7 +38,7 @@ namespace jfc::lua {
 
         struct shared_state;
 
-        coroutine(reference aThread, std::optional<std::size_t> aInstructionBudget);
+        coroutine(reference aThread, std::optional<std::chrono::nanoseconds> aTimeBudget);
 
         reference m_Thread;
 

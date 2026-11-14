@@ -195,7 +195,7 @@ TEST_CASE("a table_view knows what its table holds", "[view]") {
         env->register_function("keep", [&](const table_view &aTable) { kept = aTable.to_data_table(); });
 
         REQUIRE_FALSE(env->run("keep({ a = 1, inner = { b = 2 } })"));
-        REQUIRE_FALSE(interp.run("collectgarbage('collect')"));
+        interp.collect_garbage();
 
         REQUIRE(kept->get_number("a") == 1.0);
         REQUIRE(kept->get_data_table("inner")->get_number("b") == 2.0);
@@ -298,7 +298,9 @@ TEST_CASE("a table given to a table_view stays on the stack for the whole call",
 
         { const table_view gone = std::move(aTable); }
 
-        REQUIRE_FALSE(interp.run("collectgarbage('collect') collectgarbage('collect')"));
+        interp.collect_garbage();
+
+        interp.collect_garbage();
 
         return std::string(name);
     });

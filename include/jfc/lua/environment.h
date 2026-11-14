@@ -6,11 +6,13 @@
 #include <jfc/lua/coroutine.h>
 #include <jfc/lua/path.h>
 #include <jfc/lua/reference.h>
+#include <jfc/lua/script.h>
 #include <jfc/lua/data_table.h>
 #include <jfc/lua/typed_call.h>
 #include <jfc/lua/types.h>
 #include <jfc/lua/userdata.h>
 
+#include <chrono>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -27,8 +29,9 @@ namespace jfc::lua
     /// \brief how much of the lua standard library an environment can reach
     enum class standard_library
     {
-        /// \brief computation only: string, table, math, coroutine, bit, the clock parts of os, and the
-        /// base functions that cannot reach outside the vm
+        /// \brief computation only: the dialect's libraries that cannot reach outside the vm -- string, table, math,
+        /// coroutine, and LuaJIT's bit, or Luau's bit32, utf8, buffer and vector -- the clock parts of os, and the base
+        /// functions that cannot reach outside it
         safe,
 
         /// \brief everything luaL_openlibs opened
@@ -45,10 +48,10 @@ namespace jfc::lua
         /// \brief how much of the lua standard library scripts running here can reach
         const standard_library LIBRARY{standard_library::safe};
 
-        /// \brief vm instructions one call to this environment's `run` may execute
+        /// \brief how long one call to this environment's `run` may take
         ///
-        /// Empty defers to the interpreter's figure, which is the usual case. 
-        const std::optional<std::size_t> INSTRUCTION_BUDGET{};
+        /// Empty defers to the interpreter's figure, which is the usual case. \see interpreter_policy::TIME_BUDGET
+        const std::optional<std::chrono::nanoseconds> TIME_BUDGET{};
 
         /// \brief what kind of environment this is, under which interpreter::registered lists what is registered here
         ///
@@ -123,6 +126,9 @@ namespace jfc::lua
         /// file, as in `rules.lua:3: the bucket leaks`. Empty leaves lua to quote the script.
         [[nodiscard]] error_type run(const std::string &aLuaScript, std::string_view aName = {});
 
+        /// \brief run a compiled script here, as run runs its source, without compiling it again
+        [[nodiscard]] error_type run(const script &aScript);
+
         environment(const environment &) = delete;
         environment &operator=(const environment &) = delete;
 
@@ -130,7 +136,7 @@ namespace jfc::lua
         friend class interpreter;
 
         environment(std::shared_ptr<lua_State> aState, const int aRootReference,
-            const std::optional<std::size_t> aInstructionBudget, std::string aName);
+            const std::optional<std::chrono::nanoseconds> aTimeBudget, std::string aName);
 
         //! registers aClosure at aName, yielding its results if aYields, kept in the catalogue by aDescribe where this
         //! environment has a name. \see register_function
@@ -140,7 +146,7 @@ namespace jfc::lua
         //! a typed call of what is at aPath
         [[nodiscard]] error_type _call(const path &aPath, const detail::stack_work &aPush, const detail::stack_work &aRead);
 
-        std::optional<std::size_t> m_InstructionBudget;
+        std::optional<std::chrono::nanoseconds> m_TimeBudget;
 
         std::string m_Name;
     };

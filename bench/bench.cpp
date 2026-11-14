@@ -12,6 +12,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <variant>
@@ -57,8 +58,25 @@ namespace {
         {"method", "s = s + object:get(i)"},
     };
 
+    //! a turn of module-like work: fields read and written, arithmetic, a branch, a lua call, a c call, a string made
+    constexpr const char *WORKLOAD = R"(
+        local cells = {}
+        for i = 1, 64 do cells[i] = { x = i, y = i * 2 } end
+        local function weigh(c) return c.x * 0.5 + c.y end
+        function turn()
+            local total = 0
+            for i = 1, #cells do
+                local c = cells[i]
+                if c.x % 3 == 0 then total = total + weigh(c) else total = total - 1 end
+                c.x = c.x + 1
+            end
+            return total + #tostring(total) + numbers(1, 2, 3)
+        end
+    )";
+
+    //! the best of PASSES, in nanoseconds a call
     template <typename body_type>
-    void report(const char *const aGroup, const char *const aName, const std::size_t aCalls, body_type &&aBody) {
+    double report(const char *const aGroup, const char *const aName, const std::size_t aCalls, body_type &&aBody) {
         double best = std::numeric_limits<double>::max();
         double allocated = 0;
 
@@ -75,6 +93,8 @@ namespace {
         }
 
         std::printf("  %-11s %-24s %9.1f ns %7.2f allocs\n", aGroup, aName, best, allocated);
+
+        return best;
     }
 
     [[nodiscard]] std::string loop_around(const char *const aLine) {
@@ -89,22 +109,59 @@ namespace {
         std::exit(EXIT_FAILURE);
     }
 
+    //! aSource run in L, as luaL_dostring runs it
+    void raw_run(lua_State *const L, const std::string &aSource) {
+#if defined(JFC_LUA_LUAU)
+        std::size_t size = 0;
+
+        char *const bytecode = luau_compile(aSource.c_str(), aSource.size(), nullptr, &size);
+
+        const int loaded = luau_load(L, "=bench", bytecode, size, 0);
+
+        std::free(bytecode);
+#else
+        const int loaded = luaL_loadstring(L, aSource.c_str());
+#endif
+
+        if (loaded != 0 || lua_pcall(L, 0, 0, 0) != 0) {
+            std::fprintf(stderr, "bench failed: %s\n", lua_tostring(L, -1));
+            std::exit(EXIT_FAILURE);
+        }
+    }
+
+    //! aFunction pushed as a c function
+    void raw_push(lua_State *const L, const lua_CFunction aFunction) {
+#if defined(JFC_LUA_LUAU)
+        lua_pushcfunction(L, aFunction, "bench");
+#else
+        lua_pushcfunction(L, aFunction);
+#endif
+    }
+
+    //! aFunction made the global aName
+    void raw_register(lua_State *const L, const char *const aName, const lua_CFunction aFunction) {
+        raw_push(L, aFunction);
+        lua_setglobal(L, aName);
+    }
+
+    int raw_numbers(lua_State *const pState) {
+        lua_pushnumber(pState, lua_tonumber(pState, 1) + lua_tonumber(pState, 2) + lua_tonumber(pState, 3));
+
+        return 1;
+    }
+
     void script_calling_raw(const char *const aMode) {
         lua_State *const L = luaL_newstate();
 
         luaL_openlibs(L);
 
-        if (*aMode) luaL_dostring(L, aMode);
+        if (*aMode) raw_run(L, aMode);
 
-        lua_register(L, "none", [](lua_State *) { return 0; });
+        raw_register(L, "none", [](lua_State *) { return 0; });
 
-        lua_register(L, "numbers", [](lua_State *pState) {
-            lua_pushnumber(pState, lua_tonumber(pState, 1) + lua_tonumber(pState, 2) + lua_tonumber(pState, 3));
+        raw_register(L, "numbers", raw_numbers);
 
-            return 1;
-        });
-
-        lua_register(L, "string_in", [](lua_State *pState) {
+        raw_register(L, "string_in", [](lua_State *pState) {
             std::size_t length = 0;
 
             lua_tolstring(pState, 1, &length);
@@ -113,20 +170,20 @@ namespace {
             return 1;
         });
 
-        lua_register(L, "string_out", [](lua_State *pState) {
+        raw_register(L, "string_out", [](lua_State *pState) {
             lua_pushlstring(pState, "a short name", 12);
 
             return 1;
         });
 
-        lua_register(L, "table_in", [](lua_State *pState) {
+        raw_register(L, "table_in", [](lua_State *pState) {
             lua_getfield(pState, 1, "x");
 
             return 1;
         });
 
         lua_newtable(L);
-        lua_pushcfunction(L, [](lua_State *pState) {
+        raw_push(L, [](lua_State *pState) {
             lua_pushnumber(pState, lua_tonumber(pState, 2) + 2);
 
             return 1;
@@ -135,7 +192,7 @@ namespace {
         lua_setglobal(L, "object");
 
         for (const auto &[name, line] : SCRIPT_ROWS) {
-            luaL_dostring(L, loop_around(line).c_str());
+            raw_run(L, loop_around(line));
 
             report("raw", name, SCRIPT_CALLS, [L] {
                 lua_getglobal(L, "bench_loop");
@@ -146,12 +203,14 @@ namespace {
         lua_close(L);
     }
 
-    void script_calling(const char *const aGroup, const char *const aMode, const bool aTyped) {
+    //! under aBudget where there is one, which stops its clock for every call into c++
+    void script_calling(const char *const aGroup, const char *const aMode, const bool aTyped,
+        const std::optional<std::chrono::nanoseconds> aBudget = {}) {
         interpreter lua;
 
         require_nothing(lua.run(aMode));
 
-        auto env = lua.make_environment();
+        auto env = lua.make_environment(environment_policy{standard_library::safe, aBudget});
 
         if (aTyped) {
             env->register_function("none", [] {});
@@ -209,7 +268,7 @@ namespace {
 
         luaL_openlibs(L);
 
-        luaL_dostring(L, "function hook(a, b, c) return a end on = { update = function() end }");
+        raw_run(L, "function hook(a, b, c) return a end on = { update = function() end }");
 
         double total = 0;
 
@@ -318,7 +377,7 @@ namespace {
 
         luaL_openlibs(L);
 
-        luaL_dostring(L, "player = { hitbox = { width = 2 } }");
+        raw_run(L, "player = { hitbox = { width = 2 } }");
 
         double total = 0;
 
@@ -366,6 +425,83 @@ namespace {
     }
 }
 
+namespace {
+#if !defined(JFC_LUA_LUAU)
+    std::size_t counted = 0;
+
+    void count_instruction(lua_State *, lua_Debug *) { ++counted; }
+#endif
+
+    //! how long a turn of WORKLOAD takes, and under Lua 5.1 how many vm instructions it is where aCounted: what a
+    //! million took, which the instruction budget was counted in. LuaJIT's compiled code is not counted
+    void a_million_instructions(const char *const aMode, [[maybe_unused]] const bool aCounted) {
+        constexpr std::size_t TURNS = 20000;
+
+        lua_State *const L = luaL_newstate();
+
+        luaL_openlibs(L);
+
+        if (*aMode) raw_run(L, aMode);
+
+        raw_register(L, "numbers", raw_numbers);
+        raw_run(L, WORKLOAD);
+
+#if defined(JFC_LUA_LUAU)
+        lua_setsafeenv(L, LUA_GLOBALSINDEX, true);
+#endif
+
+        const auto turns = [L](const std::size_t aTurns) {
+            for (std::size_t i = 0; i < aTurns; ++i) {
+                lua_getglobal(L, "turn");
+                lua_pcall(L, 0, 1, 0);
+                lua_settop(L, 0);
+            }
+        };
+
+        const double perTurn = report("raw", "a turn of module work", TURNS, [&] { turns(TURNS); });
+
+#if defined(JFC_LUA_LUAU)
+        static_cast<void>(perTurn);
+#else
+        if (aCounted) {
+            constexpr std::size_t COUNTED_TURNS = 100;
+
+            counted = 0;
+
+            lua_sethook(L, count_instruction, LUA_MASKCOUNT, 1);
+            turns(COUNTED_TURNS);
+            lua_sethook(L, nullptr, 0, 0);
+
+            const double instructions = static_cast<double>(counted) / static_cast<double>(COUNTED_TURNS);
+
+            std::printf("  %-11s %-24s %9.1f\n", "", "instructions a turn", instructions);
+            std::printf("  %-11s %-24s %9.2f ms\n", "", "a million instructions", perTurn / instructions);
+        }
+#endif
+
+        lua_close(L);
+    }
+
+    //! a turn of WORKLOAD as an engine runs a module's: in an environment, under a time budget, called from c++
+    void a_turn_in_an_environment() {
+        constexpr std::size_t TURNS = 20000;
+
+        interpreter lua;
+
+        auto env = lua.make_environment(environment_policy{standard_library::safe, std::chrono::seconds(10)});
+
+        env->register_function("numbers", [](const double aA, const double aB, const double aC) {
+            return aA + aB + aC;
+        });
+
+        require_nothing(env->run(WORKLOAD));
+
+        report("environment", "a turn of module work", TURNS, [&] {
+            for (std::size_t i = 0; i < TURNS; ++i) static_cast<void>(env->call<double>("turn"));
+        });
+    }
+}
+
 int main() {
     const std::string_view backend(JFC_LUA_BENCH_BACKEND);
 
@@ -377,6 +513,7 @@ int main() {
         script_calling_raw(modes[i][1]);
         script_calling("typed", modes[i][1], true);
         script_calling("value list", modes[i][1], false);
+        script_calling("budgeted", modes[i][1], true, std::chrono::seconds(10));
     }
 
     std::printf("c++ calling a script, %s\n", JFC_LUA_BENCH_BACKEND);
@@ -388,4 +525,14 @@ int main() {
 
     reading_raw();
     reading();
+
+    for (std::size_t i = 0; i < (backend == "luajit" ? 2u : 1u); ++i) {
+        std::printf("a million instructions, %s, %s\n", JFC_LUA_BENCH_BACKEND, backend == "luajit" ? modes[i][0] : "");
+
+        a_million_instructions(modes[i][1], backend != "luajit" || i == 1);
+    }
+
+    std::printf("a turn of module work in a budgeted environment, %s\n", JFC_LUA_BENCH_BACKEND);
+
+    a_turn_in_an_environment();
 }

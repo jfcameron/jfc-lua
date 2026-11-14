@@ -15,7 +15,7 @@ namespace jfc::lua {
     namespace {
         //! room for a key and its value. Allocates, so an unbudgeted_scope must be open.
         void _make_room(lua_State *const L) {
-            if (!lua_checkstack(L, 2)) throw exception("the lua stack cannot grow enough to read this table");
+            if (!backend::check_stack(L, 2)) throw exception("the lua stack cannot grow enough to read this table");
         }
     }
 

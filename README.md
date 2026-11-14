@@ -1,5 +1,5 @@
 # jfc-lua
-A library for embedding Lua in a program. It runs scripts in sandboxed environments and passes values, functions and C++ objects between C++ and Lua. It can be built with either LuaJIT or the reference implementation of Lua 5.1.
+A library for embedding Lua in a program. It runs scripts in sandboxed environments and passes values, functions and C++ objects between C++ and Lua. It can be built with Luau, or with Lua 5.1 on LuaJIT or the reference implementation.
 
 API documentation: https://jfcameron.github.io/jfc-lua/
 
@@ -18,20 +18,22 @@ cmake --build --preset linux-gcc
 # run the tests
 ctest --preset linux-gcc
 ```
-The `linux-gcc-demo` preset builds the demo programs instead, and `linux-gcc-lua51` builds against the reference implementation rather than LuaJIT. See `CMakePresets.json` for the full list of supported platforms and compilers. See `.github/workflows/ci.yml` to see exactly how CI runners build it on different platforms.
+The `linux-gcc-demo` preset builds the demo programs instead, `linux-gcc-lua51` builds against the reference implementation rather than LuaJIT, and `linux-gcc-luau` against Luau. See `CMakePresets.json` for the full list of supported platforms and compilers. See `.github/workflows/ci.yml` to see exactly how CI runners build it on different platforms.
 
-To use it from another project, add it with `add_subdirectory` and link `jfclua`. The Lua implementation is chosen with `JFC_LUA_BACKEND`, either `luajit` (the default) or `lua51` (Lua 5.1.5, the default for Emscripten, iOS, tvOS, watchOS and visionOS, where `luajit` is refused); generation reports which it is.
+To use it from another project, add it with `add_subdirectory` and link `jfclua`. The Lua implementation is chosen with `JFC_LUA_BACKEND`: `luajit` (the default), `lua51` (Lua 5.1.5, the default for Emscripten, iOS, tvOS, watchOS and visionOS, where `luajit` is refused) or `luau`; generation reports which it is.
 
 The reference backend uses the LuaDist `5.1.5` submodule's `src/` library sources and stock `luaconf.h.orig`, copied to the build directory as `luaconf.h`. It is built as C++, with jfc-lua's numeric conversion and platform settings, independently of LuaDist's build configuration and optional relative-path loader.
+
+The Luau backend builds the `extern/luau` submodule, a tagged release, without its command line or analysis. Its parser and `tonumber` read numbers with `strtod`, so jfc-lua forces a header into those two files that reads them with a point whatever the C locale.
 
 ## Overview
 ### Entry point
 An interpreter owns a Lua state and the standard library loaded into it. It can run scripts and register functions itself, but those see the interpreter's own globals and the whole standard library, so scripts are usually run in environments instead.
 
 ### Environments
-An environment is an independent set of global variables, made by an interpreter, and the scripts that run against it. A script in one environment cannot see or change the globals of another, while all of them share the one Lua state, so an environment is cheap to make: one per character, per mod, or per anything else that should not interfere with the rest. The standard library is shared between environments and is read only from inside them, so one cannot replace `string.format` for everyone else.
+An environment is an independent set of global variables, made by an interpreter, and the scripts that run against it. A script in one environment cannot see or change the globals of another, while all of them share the one Lua state, so an environment is cheap to make: one per character, per mod, or per anything else that should not interfere with the rest. The standard library is shared between environments and is read only from inside them, `rawset` included, so one cannot replace `string.format` for everyone else; nor can an environment reach what they share through its own metatable. Under Luau an environment is safe in Luau's sense: a call to a builtin such as `math.floor` goes straight to it, so one that names a library afresh (`math = mine`) changes what it reads but not those calls, while every other global is read when it is read, as under Lua 5.1.
 
-By default an environment can only reach the parts of the standard library that compute: string, table, math, coroutine, the clock parts of os, and the base functions that cannot reach outside the VM. It can be given the unrestricted standard library instead, but that includes `debug`, which can reach every other environment in the same interpreter and run commands on the system.
+By default an environment can only reach the parts of the standard library that compute: string, table, math, coroutine, the dialect's own such libraries (LuaJIT's `bit`; Luau's `bit32`, `utf8`, `buffer` and `vector`), the clock parts of os, and the base functions that cannot reach outside the VM. It can be given the unrestricted standard library instead, but that includes `debug`, which can reach every other environment in the same interpreter and run commands on the system.
 
 Functions registered with an environment are C++ lambdas, and are visible to that environment alone. A C++ exception thrown inside one becomes a Lua error in the script that called it, since a C++ exception cannot unwind through Lua. A registered function lives in the Lua state, so one that holds an environment or reference by `std::shared_ptr` keeps the whole interpreter alive: hold a `std::weak_ptr` instead.
 
@@ -57,7 +59,7 @@ env->register_function("firework", [&](const table_view &aOptions) {
 
 A table it reads may hold anything, since only what is asked for is looked at, and no metamethods run. A nested view gives its place on the Lua stack back when it is destroyed. Use `to_data_table` to keep the contents.
 
-A `function_reference` is a function the script passed, to call during the call or to keep and call later. It runs in the environment that made it, and under the instruction budget of the environment it was given to. A `reference` takes any value but nil in the same way, so a table can be kept without a copy, and read later as it is by then. Either can be returned. Keeping one inside something Lua owns, such as a registered closure's captures, keeps the interpreter's state alive for good.
+A `function_reference` is a function the script passed, to call during the call or to keep and call later. It runs in the environment that made it, and under the time budget of the environment it was given to. A `reference` takes any value but nil in the same way, so a table can be kept without a copy, and read later as it is by then. Either can be returned. Keeping one inside something Lua owns, such as a registered closure's captures, keeps the interpreter's state alive for good.
 
 A trailing `value_list_type` takes every argument left, for a function that is only partly fixed. On its own it is a function whose arguments are decided at run time, which remains an ordinary way to write one, though typed functions are faster.
 
@@ -66,6 +68,9 @@ An environment made with a name, `make_environment({standard_library::safe, {}, 
 
 ### Script names
 `run` and `validate_syntax` take a name for the script, usually its file, which errors use for it and for every function it defines: `rules.lua:3: the bucket leaks`. Without one, Lua quotes the start of the script instead.
+
+### Compiled scripts
+A `script` is compiled once and run in any environment of any interpreter, as often as wanted, with `run(script)`: Luau compiles to bytecode, so a script run in many environments, such as every player's interface, is not compiled again for each. It takes a name as `run` does. One that does not compile gives its error where it is run. Under Lua 5.1 it holds the source.
 
 ### Paths
 Values are read and written by path, in the same form Lua uses: `"player.hitbox.bounds.x"`, `"names[1]"`. A path can also be written out as its keys, `{"names", 1}`, for one assembled at runtime.
@@ -121,15 +126,20 @@ A result of the wrong type is an error, such as `on.hit: result 1 wants a number
 A `path` built once is faster than a string parsed for every call, and a `reference` taken with `read_reference` is faster again, since it skips finding the function: about half the time of a call by name. Use one for anything called every frame.
 
 ### Limits
-An interpreter can be given a memory budget for the whole state, a memory budget for how much one run may add to it, and an instruction budget for how much one run may execute. An environment can have an instruction budget of its own. When a script reaches its instruction budget it stops with an error, as it does when allocation goes over a memory budget, unless the program has given a callback that chooses to let it carry on. This stops an infinite loop or a runaway allocation in a script from taking the program down with it. Under LuaJIT, code run under an instruction budget is kept off the JIT, since compiled code is not counted. A call timer can also be set to time every call scripts make into registered functions, to see which of them a script spends its time in.
+An interpreter can be given a memory budget for the whole state, a memory budget for how much one run may add to it, and a time budget for how long one run may take. An environment can have a time budget of its own. When a script runs past its time budget it stops with an error, as it does when allocation goes over a memory budget, unless the program has given a callback that chooses to let it carry on. This stops an infinite loop or a runaway allocation in a script from taking the program down with it. The time is the script's own: the clock starts once the script is loaded, stops while a registered function runs, and starts again for a script that function runs, so neither loading nor a slow C++ function spends a script's budget. Under Lua 5.1 the clock is looked at every thousand instructions, and under Luau at its interrupt, which comes at calls and loops. Under LuaJIT, code run under a time budget is kept off the JIT, since compiled code does not stop to look. A call timer can also be set to time every call scripts make into registered functions, to see which of them a script spends its time in.
+
+`collect_garbage` collects in full there and then, freeing what nothing holds and destroying the C++ objects among it. Luau has no `collectgarbage` for a script to call.
 
 ## Installing
 `cmake --install` installs the library, its Lua backend and its headers, and `find_package(jfclua)` provides `jfc::lua`. No Lua header is installed, as none is needed to use the library. `test/consume` is a project that does this.
 
 ## Benchmarks
-The `linux-gcc-bench` and `linux-gcc-lua51-bench` presets build `jfclua_bench`, which times calls in each direction against the raw Lua API, and counts allocations exactly.
+The `linux-gcc-bench`, `linux-gcc-lua51-bench` and `linux-gcc-luau-bench` presets build `jfclua_bench`, which times calls in each direction against the raw Lua API, and counts allocations exactly. It also times a turn of module-like work and, under Lua 5.1, counts its instructions, to say what a million took.
+
+## Why Luau?
+For its types: Luau is Lua 5.1's language with a gradual type system, for a program whose scripts are many and large. It is C++, so it builds for WebAssembly and under the sanitizers, and its errors are C++ exceptions. A script using its syntax, such as type annotations, `continue` or `+=`, does not load on the Lua 5.1 backends.
 
 ## Why Lua 5.1?
 Because it is what LuaJIT implements, and LuaJIT is by far the fastest Lua there is. Its weakness is that its interpreter is machine code, written for x86, ARM, PPC and MIPS, so it has no WebAssembly target, and cannot have one, since a page in a browser cannot write machine code to run. The reference implementation of Lua 5.1 is plain C, and builds anywhere a C compiler does, Emscripten included, so a browser build uses it. Apple's devices use it too. LuaJIT runs there without its JIT, which they forbid, and unwinds its errors itself rather than through the C++ runtime, so an error raised while jfc-lua's C++ code holds objects would skip their destructors. The reference implementation is built as C++, so its errors are C++ exceptions and unwind like any other. CI builds the Emscripten version and runs its tests under node, where the limits work as they do on the desktop.
 
-Since both are Lua 5.1, the same scripts run on either, as long as they avoid LuaJIT's own extensions, such as `ffi` and the `bit` library.
+Since both are Lua 5.1, the same scripts run on either, as long as they avoid LuaJIT's own extensions, such as `ffi` and the `bit` library. Luau runs the same scripts too, but for what it leaves out: `loadstring`, `collectgarbage`, `io`, `package`, `require` and most of `os`.

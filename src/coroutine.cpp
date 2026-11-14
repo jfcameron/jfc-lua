@@ -14,13 +14,13 @@ namespace jfc::lua {
 
         bool running = false;
 
-        std::optional<std::size_t> instructionBudget;
+        std::optional<std::chrono::nanoseconds> timeBudget;
     };
 
-    coroutine::coroutine(reference aThread, const std::optional<std::size_t> aInstructionBudget)
+    coroutine::coroutine(reference aThread, const std::optional<std::chrono::nanoseconds> aTimeBudget)
     : m_Thread(std::move(aThread))
     , m_pShared(std::make_shared<shared_state>()) {
-        m_pShared->instructionBudget = aInstructionBudget;
+        m_pShared->timeBudget = aTimeBudget;
     }
 
     coroutine::status coroutine::state() const { return m_pShared->state; }
@@ -49,9 +49,9 @@ namespace jfc::lua {
 
         if (!thread) return "the coroutine's thread is gone";
 
-        const budget_scope budget(thread, shared.instructionBudget);
+        const budget_scope budget(thread, shared.timeBudget);
 
-        if (budget.aborted()) return "script exceeded its instruction budget";
+        if (budget.aborted()) return "script exceeded its time budget";
 
         const int argumentCount = static_cast<int>(aArguments.size());
 
@@ -67,7 +67,7 @@ namespace jfc::lua {
             bool pushed = false;
 
             if (const auto error = detail::protect(L, [&](lua_State *const pState) {
-                if (!lua_checkstack(pState, argumentCount)) return;
+                if (!backend::check_stack(pState, argumentCount)) return;
 
                 for (const auto &argument : aArguments) detail::push_param(pState, argument);
 
@@ -82,7 +82,7 @@ namespace jfc::lua {
 
         shared.running = true;
 
-        const int result = lua_resume(thread, argumentCount);
+        const int result = backend::resume(thread, L, argumentCount);
 
         shared.running = false;
 
@@ -107,7 +107,7 @@ namespace jfc::lua {
         error_type error;
 
         if (const auto unread = detail::protect(L, [&](lua_State *const pState) {
-            if (!lua_checkstack(pState, resultCount)) {
+            if (!backend::check_stack(pState, resultCount)) {
                 error = "the coroutine gave more values than the lua stack can hold";
 
                 return;

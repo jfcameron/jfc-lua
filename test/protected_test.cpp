@@ -4,6 +4,7 @@
 
 #include <jfc/lua.h>
 
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -11,6 +12,7 @@
 #include <variant>
 
 using namespace jfc::lua;
+using namespace std::chrono_literals;
 
 TEST_CASE("a metamethod that raises does not end the program", "[protected]") {
     interpreter interp;
@@ -49,7 +51,7 @@ TEST_CASE("a metamethod that raises does not end the program", "[protected]") {
 }
 
 TEST_CASE("a read through a metamethod that never returns is stopped by the budget", "[protected]") {
-    interpreter interp(interpreter_policy{0, 0, 100000});
+    interpreter interp(interpreter_policy{0, 0, 20ms});
 
     auto env = interp.make_environment();
 
@@ -83,7 +85,7 @@ TEST_CASE("the memory budget spent, what c++ asks of lua fails without ending th
 
     REQUIRE_FALSE(env->run(
         "function take(...) return select('#', ...) end\n"
-        "function release() hog = nil collectgarbage() end\n"
+        "function release() hog = nil end\n"
         "function waiting() while true do coroutine.yield(select('#', coroutine.yield())) end end\n"
         "function give_by_method() return the_giver:give() end").has_value());
 
@@ -97,10 +99,10 @@ TEST_CASE("the memory budget spent, what c++ asks of lua fails without ending th
     REQUIRE_FALSE(co->resume().has_value());
 
     REQUIRE_FALSE(env->run(
-        "hog = {}\n"
-        "assert(not pcall(function() for n = 1, 1e9 do hog[n] = string.rep('x', 1000) .. n end end))\n"
-        "for n = 1, 8 do hog[#hog] = nil end\n"
-        "collectgarbage()").has_value());
+        "assert(not pcall(function() while true do hog = { next = hog } end end))\n"
+        "for n = 1, 8 do hog = hog.next end").has_value());
+
+    interp.collect_garbage();
 
     SECTION("a write throws") {
         REQUIRE_THROWS_AS([&] { for (int n = 0; n < 64; ++n) env->write("more.k" + std::to_string(n), big); }(),
@@ -132,7 +134,7 @@ TEST_CASE("the memory budget spent, what c++ asks of lua fails without ending th
     }
 
     SECTION("a resume that cannot push its arguments is an error, and the coroutine waits on") {
-        const auto error = co->resume({big});
+        const auto error = co->resume({std::string(1u << 20, 'y')});
 
         REQUIRE(error.has_value());
         REQUIRE_THAT(*error, Catch::Matchers::Contains("not enough memory"));
@@ -140,6 +142,8 @@ TEST_CASE("the memory budget spent, what c++ asks of lua fails without ending th
 
         SECTION("to be resumed once there is room") {
             REQUIRE_FALSE(env->call("release").has_value());
+
+            interp.collect_garbage();
 
             value_list_type results;
 
@@ -150,7 +154,7 @@ TEST_CASE("the memory budget spent, what c++ asks of lua fails without ending th
     }
 
     SECTION("a resume with more arguments than the coroutine has room for does not end the program") {
-        const value_list_type many(2000, 1.0);
+        const value_list_type many(7000, 1.0);
 
         value_list_type results;
 
@@ -167,6 +171,8 @@ TEST_CASE("the memory budget spent, what c++ asks of lua fails without ending th
 
     SECTION("and once the script lets go, there is room again") {
         REQUIRE_FALSE(env->call("release").has_value());
+
+        interp.collect_garbage();
 
         env->write("more.k", big);
 

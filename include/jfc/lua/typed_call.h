@@ -10,6 +10,7 @@
 #include <jfc/lua/types.h>
 #include <jfc/lua/userdata.h>
 
+#include <chrono>
 #include <cstddef>
 #include <exception>
 #include <functional>
@@ -467,7 +468,7 @@ namespace jfc::lua
     template <typename result_type, typename... argument_types>
     call_outcome<result_type> function_reference::call(const argument_types &...aArguments) {
         return detail::typed_outcome<result_type>([this](const detail::stack_work &aPush, const detail::stack_work &aRead)
-            { return _call(aPush, aRead, m_InstructionBudget); }, aArguments...);
+            { return _call(aPush, aRead, m_TimeBudget); }, aArguments...);
     }
 }
 

@@ -38,7 +38,7 @@ namespace jfc::lua::detail {
 
             lua_pushvalue(L, aIndex);
 
-            return luaL_ref(L, LUA_REGISTRYINDEX);
+            return backend::ref(L);
         }
     }
 
@@ -170,7 +170,7 @@ namespace jfc::lua::detail {
 
         const auto *const pLimits = _limits(m_pState);
 
-        return function_reference(pLimits->state.lock(), _anchor(m_pState, index), pLimits->instructionBudget);
+        return function_reference(pLimits->state.lock(), _anchor(m_pState, index), pLimits->timeBudget);
     }
 
     userdata call_frame::object(const int aIndex) const {
@@ -194,7 +194,7 @@ namespace jfc::lua::detail {
     }
 
     void call_frame::reserve(const std::size_t aCount) {
-        if (!lua_checkstack(m_pState, static_cast<int>(aCount)))
+        if (!backend::check_stack(m_pState, static_cast<int>(aCount)))
             throw exception("the lua stack cannot grow enough to return this many values");
     }
 

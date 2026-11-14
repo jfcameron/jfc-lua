@@ -21,6 +21,7 @@ namespace {
     const char BOXES = 0;   //!< registry: type key -> weak table of address -> box
     const char METHODS = 0; //!< in a registered type's metatable: its methods table
     const char NAME = 0;    //!< in a registered type's metatable: the name it was registered under
+    [[maybe_unused]] const char FIELDS = 0; //!< under Luau, in a box's own metatable: the table of its own fields
 
     const std::string CALL = "__call";
 
@@ -60,8 +61,62 @@ namespace {
         lua_rawset(L, LUA_REGISTRYINDEX);
     }
 
+    //! the index aIndex stands for, counted from the bottom
+    [[nodiscard]] int _absolute(lua_State *const L, const int aIndex) {
+        return aIndex > 0 || aIndex <= LUA_REGISTRYINDEX ? aIndex : lua_gettop(L) + aIndex + 1;
+    }
+
+    //! push the table the box at aBox keeps its own fields in, nil where it has none: its environment under Lua 5.1,
+    //! and under Luau, whose userdata have none, its own metatable's
+    void _push_fields(lua_State *const L, const int aBox) {
+#if defined(JFC_LUA_LUAU)
+        if (!lua_getmetatable(L, aBox)) {
+            lua_pushnil(L);
+
+            return;
+        }
+
+        _push_key(L, &FIELDS);
+        lua_rawget(L, -2);
+        lua_remove(L, -2);
+#else
+        lua_getfenv(L, aBox);
+#endif
+    }
+
+    //! a new, empty table of its own fields for the box at aBox. Under Luau the box is given a copy of its metatable
+    //! to keep it in: there a weak-keyed table would keep a box alive through a field holding the box itself
+    void _give_fields(lua_State *const L, const int aBox) {
+        const int box = _absolute(L, aBox);
+
+#if defined(JFC_LUA_LUAU)
+        lua_getmetatable(L, box);
+
+        const int shared = lua_gettop(L);
+
+        lua_newtable(L);
+        lua_pushnil(L);
+
+        while (lua_next(L, shared)) {
+            lua_pushvalue(L, -2);
+            lua_insert(L, -2);
+            lua_rawset(L, -4);
+        }
+
+        _push_key(L, &FIELDS);
+        lua_newtable(L);
+        lua_rawset(L, -3);
+
+        lua_setmetatable(L, box);
+        lua_pop(L, 1);
+#else
+        lua_newtable(L);
+        lua_setfenv(L, box);
+#endif
+    }
+
     void _fill_common(lua_State *const L) {
-        lua_pushcfunction(L, _destroy_box);
+        jfc::lua::backend::push_function(L, _destroy_box, "jfc.lua.userdata.__gc");
         lua_setfield(L, -2, "__gc");
 
         lua_pushboolean(L, 0);
@@ -97,7 +152,7 @@ namespace {
 
         lua_pop(L, 1);
 
-        lua_getfenv(L, 1);
+        _push_fields(L, 1);
 
         if (!lua_istable(L, -1)) return 0;
 
@@ -114,13 +169,13 @@ namespace {
         if (!lua_isnil(L, -1)) {
             const char *const key = lua_tostring(L, 2);
 
-            return luaL_error(L, "%s is a method of %s and cannot be assigned to",
+            return JFC_LUA_RAISE(L, "%s is a method of %s and cannot be assigned to",
                 key ? key : "that", lua_tostring(L, lua_upvalueindex(2)));
         }
 
         lua_pop(L, 1);
 
-        lua_getfenv(L, 1);
+        _push_fields(L, 1);
 
         lua_pushvalue(L, 2);
         lua_pushvalue(L, 3);
@@ -144,7 +199,7 @@ namespace {
         const void *const typeKey = lua_touserdata(pState, lua_upvalueindex(2));
 
         if (!self || self->empty() || self->type_key() != typeKey)
-            return luaL_error(pState, "%s is a method of %s: call it on one, with a colon -- "
+            return JFC_LUA_RAISE(pState, "%s is a method of %s: call it on one, with a colon -- "
                 "object:%s(...)", lua_tostring(pState, lua_upvalueindex(4)),
                 lua_tostring(pState, lua_upvalueindex(3)), lua_tostring(pState, lua_upvalueindex(4)));
 
@@ -212,13 +267,12 @@ namespace jfc::lua::detail {
             lua_pop(L, 1);
         }
 
-        new (lua_newuserdata(L, sizeof(userdata))) userdata(aValue);
+        backend::new_userdata(L, userdata(aValue));
 
         if (_push_type_metatable(L, aValue.type_key())) {
             lua_setmetatable(L, -2);
 
-            lua_newtable(L);
-            lua_setfenv(L, -2);
+            _give_fields(L, -1);
         }
         else {
             _push_generic_metatable(L);
@@ -293,7 +347,7 @@ namespace jfc::lua::detail {
 
         if (method) return false;
 
-        lua_getfenv(L, aBox);
+        _push_fields(L, aBox);
 
         return true;
     }
@@ -317,13 +371,10 @@ namespace jfc::lua {
             const int methods = lua_gettop(L);
 
             for (auto &[name, method, describe] : aMethods) {
-                auto *const pStorage = static_cast<detail::typed_method_type *>(
-                    lua_newuserdata(L, sizeof(detail::typed_method_type)));
-
-                new (pStorage) detail::typed_method_type(std::move(method));
+                backend::new_userdata<detail::typed_method_type>(L, std::move(method));
 
                 lua_newtable(L);
-                lua_pushcfunction(L, _destroy_method);
+                backend::push_function(L, _destroy_method, "jfc.lua.method.__gc");
                 lua_setfield(L, -2, "__gc");
                 lua_setmetatable(L, -2);
 
@@ -332,7 +383,7 @@ namespace jfc::lua {
                 lua_pushstring(L, name.c_str());
                 lua_pushstring(L, (aName + ":" + name).c_str());
 
-                lua_pushcclosure(L, _method_trampoline, 5);
+                backend::push_closure(L, _method_trampoline, "jfc.lua.method", 5);
 
                 lua_setfield(L, name == CALL ? metatable : methods, name.c_str());
             }
@@ -342,16 +393,16 @@ namespace jfc::lua {
             lua_rawset(L, metatable);
 
             lua_pushvalue(L, methods);
-            lua_pushcclosure(L, _index, 1);
+            backend::push_closure(L, _index, "jfc.lua.userdata.__index", 1);
             lua_setfield(L, metatable, "__index");
 
             lua_pushvalue(L, methods);
             lua_pushstring(L, aName.c_str());
-            lua_pushcclosure(L, _newindex, 2);
+            backend::push_closure(L, _newindex, "jfc.lua.userdata.__newindex", 2);
             lua_setfield(L, metatable, "__newindex");
 
             lua_pushstring(L, aName.c_str());
-            lua_pushcclosure(L, _tostring, 1);
+            backend::push_closure(L, _tostring, "jfc.lua.userdata.__tostring", 1);
             lua_setfield(L, metatable, "__tostring");
 
             _push_key(L, &NAME);
@@ -381,7 +432,7 @@ namespace jfc::lua {
         if (const auto error = detail::protect(L, [&](lua_State *) {
             detail::push_userdata(L, aObject);
 
-            held = luaL_ref(L, LUA_REGISTRYINDEX);
+            held = backend::ref(L);
         })) throw exception("could not hold an object: " + *error);
 
         return reference(m_pState, held);

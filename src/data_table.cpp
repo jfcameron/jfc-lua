@@ -734,7 +734,8 @@ namespace jfc::lua {
     }
 
     void data_table::push_to_lua_state(lua_State *L) const {
-        if (!lua_checkstack(L, 3)) throw exception("data_table::push_to_lua_state: nested too deep for the lua stack");
+        if (!backend::check_stack(L, 3))
+            throw exception("data_table::push_to_lua_state: nested too deep for the lua stack");
 
         lua_newtable(L);
 
@@ -878,7 +879,7 @@ namespace jfc::lua {
             throw exception("table: nesting deeper than " + std::to_string(MAXIMUM_DEPTH)
                 + " levels cannot be stored");
 
-        if (!lua_checkstack(L, 5))
+        if (!backend::check_stack(L, 5))
             throw exception("table: the lua stack cannot grow enough to read this table");
 
         aContext.ancestors.push_back(lua_topointer(L, aIndex));

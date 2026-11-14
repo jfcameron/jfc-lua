@@ -24,6 +24,14 @@ jobs:
             runner: ubuntu-latest
             tests: true
 
+          - preset: linux-gcc-luau
+            runner: ubuntu-latest
+            tests: true
+
+          - preset: linux-clang-luau
+            runner: ubuntu-latest
+            tests: true
+
           - preset: linux-clang
             runner: ubuntu-latest
             tests: true
@@ -60,6 +68,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           submodules: recursive
+
+      # a locale with a comma for its decimal point, without which the locale tests check nothing
+      - name: comma locale
+        if: matrix.tests && runner.os == 'Linux'
+        run: sudo locale-gen de_DE.UTF-8
 
       - name: configure
         run: cmake --preset ${{ matrix.preset }}

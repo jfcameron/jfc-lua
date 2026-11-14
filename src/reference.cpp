@@ -16,7 +16,7 @@ namespace jfc::lua {
             {
                 const unbudgeted_scope unbudgeted(state.get());
 
-                luaL_unref(state.get(), LUA_REGISTRYINDEX, *aReference);
+                backend::unref(state.get(), *aReference);
             }
 
             delete aReference;
@@ -26,13 +26,13 @@ namespace jfc::lua {
     reference::~reference() = default;
 
     function_reference::function_reference(std::shared_ptr<lua_State> aState, const int aRegistryReference,
-        const std::optional<std::size_t> aInstructionBudget)
+        const std::optional<std::chrono::nanoseconds> aTimeBudget)
     : reference(std::move(aState), aRegistryReference)
-    , m_InstructionBudget(aInstructionBudget)
+    , m_TimeBudget(aTimeBudget)
     {}
 
     error_type function_reference::call(const value_list_type &aArguments, value_list_type &aResults)
-        { return _call(aArguments, aResults, m_InstructionBudget); }
+        { return _call(aArguments, aResults, m_TimeBudget); }
 
     error_type function_reference::call(const value_list_type &aArguments) {
         value_list_type discarded;

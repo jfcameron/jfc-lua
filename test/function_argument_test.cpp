@@ -4,12 +4,15 @@
 
 #include <jfc/lua.h>
 
+#include <chrono>
+
 #include <memory>
 #include <optional>
 #include <string>
 #include <variant>
 
 using namespace jfc::lua;
+using namespace std::chrono_literals;
 
 namespace {
     [[nodiscard]] bool mentions(const error_type &aError, const std::string &aText) {
@@ -50,7 +53,7 @@ TEST_CASE("a script can give a typed function a function", "[callback]") {
             end)
         )"));
 
-        REQUIRE_FALSE(interp.run("collectgarbage('collect')"));
+        interp.collect_garbage();
 
         value_list_type results;
 
@@ -133,10 +136,10 @@ TEST_CASE("a held function runs in the environment that made it", "[callback][en
     REQUIRE(std::get<std::string>(results.at(0)) == "one");
 }
 
-TEST_CASE("a held function keeps its environment's instruction budget", "[callback][limits]") {
+TEST_CASE("a held function keeps its environment's time budget", "[callback][limits]") {
     interpreter interp;
 
-    auto env = interp.make_environment(environment_policy{standard_library::safe, 1000});
+    auto env = interp.make_environment(environment_policy{standard_library::safe, 100ms});
 
     std::optional<function_reference> held;
 
@@ -144,7 +147,7 @@ TEST_CASE("a held function keeps its environment's instruction budget", "[callba
 
     REQUIRE_FALSE(env->run(R"(
         later(function()
-            for i = 1, 10000000 do end
+            while true do end
         end)
     )"));
 
@@ -205,7 +208,7 @@ TEST_CASE("a function given from a coroutine", "[callback][coroutine]") {
             REQUIRE_FALSE(co->resume());
         }
 
-        REQUIRE_FALSE(interp.run("collectgarbage('collect')"));
+        interp.collect_garbage();
 
         value_list_type results;
 
@@ -280,13 +283,13 @@ TEST_CASE("a typed function can take any lua value by reference", "[callback]") 
             fill()
         )"));
 
-        REQUIRE_FALSE(interp.run("collectgarbage('collect')"));
+        interp.collect_garbage();
         REQUIRE_FALSE(env->run("out = weak[1] == nil"));
         REQUIRE(env->read_boolean("out") == false);
 
         held.reset();
 
-        REQUIRE_FALSE(interp.run("collectgarbage('collect')"));
+        interp.collect_garbage();
         REQUIRE_FALSE(env->run("out = weak[1] == nil"));
         REQUIRE(env->read_boolean("out") == true);
     }

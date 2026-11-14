@@ -4,6 +4,8 @@
 
 #include <jfc/lua.h>
 
+#include <chrono>
+
 #include <cstddef>
 #include <memory>
 #include <optional>
@@ -14,6 +16,7 @@
 #include <variant>
 
 using namespace jfc::lua;
+using namespace std::chrono_literals;
 
 namespace {
     struct lantern final { int lit = 0; };
@@ -314,26 +317,26 @@ TEST_CASE("a typed call works on everything that can be called", "[call][typed]"
 }
 
 TEST_CASE("a typed call keeps to its budgets", "[call][typed][limits]") {
-    SECTION("instructions, on an environment") {
+    SECTION("time, on an environment") {
         interpreter lua;
 
-        auto env = lua.make_environment(environment_policy{standard_library::safe, 1000});
+        auto env = lua.make_environment(environment_policy{standard_library::safe, 100ms});
 
-        REQUIRE_FALSE(env->run("function spin() for i = 1, 10000000 do end return 1 end"));
+        REQUIRE_FALSE(env->run("function spin() while true do end return 1 end"));
 
         REQUIRE(mentions(env->call<double>("spin").error(), "budget"));
     }
 
-    SECTION("instructions, on a function_reference") {
+    SECTION("time, on a function_reference") {
         interpreter lua;
 
-        auto env = lua.make_environment(environment_policy{standard_library::safe, 1000});
+        auto env = lua.make_environment(environment_policy{standard_library::safe, 100ms});
 
         std::optional<function_reference> held;
 
         env->register_function("later", [&](function_reference aFunction) { held = std::move(aFunction); });
 
-        REQUIRE_FALSE(env->run("later(function() for i = 1, 10000000 do end end)"));
+        REQUIRE_FALSE(env->run("later(function() while true do end end)"));
 
         REQUIRE(mentions(held->call<void>(), "budget"));
         REQUIRE(mentions(held->call<double>().error(), "budget"));

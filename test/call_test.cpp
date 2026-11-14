@@ -4,11 +4,14 @@
 
 #include <jfc/lua.h>
 
+#include <chrono>
+
 #include <optional>
 #include <stdexcept>
 #include <string>
 
 using namespace jfc::lua;
+using namespace std::chrono_literals;
 
 TEST_CASE("a lua function can be called, with values rather than source", "[call]") {
     interpreter interp;
@@ -191,9 +194,9 @@ TEST_CASE("a call goes through the same guards as a run", "[call]") {
         REQUIRE(error->find("from the registered function") != std::string::npos);
     }
 
-    SECTION("a runaway function is stopped by the instruction budget") {
+    SECTION("a runaway function is stopped by the time budget") {
         interpreter interp(interpreter_policy{.MEMORY_BUDGET_IN_BYTES = 0,
-            .MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN = 0, .INSTRUCTION_BUDGET = 100000});
+            .MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN = 0, .TIME_BUDGET = 20ms});
 
         auto env = interp.make_environment();
 
@@ -202,7 +205,7 @@ TEST_CASE("a call goes through the same guards as a run", "[call]") {
         const auto error = env->call("forever");
 
         REQUIRE(error.has_value());
-        REQUIRE(error->find("instruction budget") != std::string::npos);
+        REQUIRE(error->find("time budget") != std::string::npos);
     }
 
     SECTION("a call resolves in its own environment") {

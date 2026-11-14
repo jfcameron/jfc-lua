@@ -241,11 +241,11 @@ TEST_CASE("destroying an environment does not disturb the others", "[environment
         REQUIRE_FALSE(doomed->run("hp = 1  noop()").has_value());
     }
 
-    REQUIRE_FALSE(interp.run("collectgarbage('collect')").has_value());
+    interp.collect_garbage();
 
     REQUIRE(survivor->read_number("hp") == 100);
 
-    REQUIRE_FALSE(interp.run("collectgarbage('collect')").has_value());
+    interp.collect_garbage();
 }
 
 TEST_CASE("re-registering a function releases the previous one", "[environment]") {
@@ -261,7 +261,7 @@ TEST_CASE("re-registering a function releases the previous one", "[environment]"
         REQUIRE_FALSE(env->run("f()").has_value());
     }
 
-    REQUIRE_FALSE(interp.run("collectgarbage('collect')").has_value());
+    interp.collect_garbage();
 
     REQUIRE(alive.use_count() >= 1);
 }
@@ -358,6 +358,7 @@ TEST_CASE("an environment can be entered from inside another", "[environment]") 
         REQUIRE(npc->read_string("mine") == "the npc");
     }
 
+#if !defined(JFC_LUA_LUAU)
     SECTION("code loaded after an inner call still belongs to the outer environment") {
         npc->register_function("open_menu", [menu = menu.get()](value_list_type) -> value_list_type {
             REQUIRE_FALSE(menu->run("opened = true").has_value());
@@ -372,6 +373,7 @@ TEST_CASE("an environment can be entered from inside another", "[environment]") 
         REQUIRE(npc->read_boolean("compiled_later") == true);
         REQUIRE_FALSE(menu->read_boolean("compiled_later").has_value());
     }
+#endif
 
     SECTION("nesting several deep unwinds in the right order") {
         auto inner = interp.make_environment(environment_policy{standard_library::unrestricted});
@@ -408,7 +410,29 @@ TEST_CASE("the standard library cannot be rewritten from inside an environment",
         const auto error = vandal->run("math.floor = function() return 'hijacked' end");
 
         REQUIRE(error.has_value());
+#if defined(JFC_LUA_LUAU)
+        REQUIRE(error->find("readonly") != std::string::npos);
+#else
         REQUIRE(error->find("standard library") != std::string::npos);
+#endif
+    }
+
+    SECTION("nor with rawset, which goes round a metatable") {
+        REQUIRE_FALSE(vandal->run("tried = pcall(rawset, math, 'floor', function() return 'hijacked' end)"));
+        REQUIRE(vandal->read_boolean("tried") == false);
+
+        REQUIRE_FALSE(bystander->run("still = math.floor(2.7)").has_value());
+        REQUIRE(bystander->read_number("still") == 2);
+    }
+
+    SECTION("nor through the environment's own metatable, to what every environment shares") {
+        REQUIRE_FALSE(vandal->run("hidden = tostring(getmetatable(_G))").has_value());
+        REQUIRE(vandal->read_string("hidden") == "false");
+
+        REQUIRE_FALSE(vandal->run("pcall(function() getmetatable(_G).__index.print = nil end)").has_value());
+
+        REQUIRE_FALSE(bystander->run("kind = type(print)").has_value());
+        REQUIRE(bystander->read_string("kind") == "function");
     }
 
     SECTION("and nothing is changed for anyone by the attempt") {
@@ -496,10 +520,10 @@ TEST_CASE("c++ can add to a library within one environment", "[environment]") {
     }
 
     SECTION("writing a value into a library path behaves the same way") {
-        env->write("math.tau", 6.28);
+        env->write("math.answer", 42.0);
 
-        REQUIRE(env->read_number("math.tau") == 6.28);
-        REQUIRE_FALSE(other->read_number("math.tau").has_value());
+        REQUIRE(env->read_number("math.answer") == 42);
+        REQUIRE_FALSE(other->read_number("math.answer").has_value());
 
         REQUIRE_FALSE(env->run("floored = math.floor(2.7)").has_value());
         REQUIRE(env->read_number("floored") == 2);
@@ -525,6 +549,19 @@ TEST_CASE("the host is deliberately not restricted", "[environment]") {
     REQUIRE(env->read_number("doubled") == 8);
 }
 
+TEST_CASE("a global is read as it is when it is read, not as it was when its reader was loaded", "[environment]") {
+    interpreter interp;
+
+    auto env = interp.make_environment();
+
+    REQUIRE_FALSE(env->run("function helper() return 1 end lib = { f = function() return 1 end }"));
+    REQUIRE_FALSE(env->run("function ask() return helper() + lib.f() end"));
+    REQUIRE_FALSE(env->run("function helper() return 2 end lib.f = function() return 20 end"));
+    REQUIRE_FALSE(env->run("answer = ask()"));
+
+    REQUIRE(env->read_number("answer") == 22);
+}
+
 TEST_CASE("the nested table route is closed by absence rather than by protection", "[environment]") {
     interpreter interp;
 
@@ -538,6 +575,7 @@ TEST_CASE("the nested table route is closed by absence rather than by protection
         REQUIRE(b->read_string("seen") == "nil");
     }
 
+#if !defined(JFC_LUA_LUAU)
     SECTION("an unrestricted one still shares what is nested, by design") {
         auto a = interp.make_environment(environment_policy{standard_library::unrestricted});
         auto b = interp.make_environment(environment_policy{standard_library::unrestricted});
@@ -549,6 +587,7 @@ TEST_CASE("the nested table route is closed by absence rather than by protection
 
         REQUIRE(a->run("package.path = '/tmp/?.lua'").has_value());
     }
+#endif
 }
 
 TEST_CASE("a safe environment cannot reach the host", "[environment][sandbox]") {
@@ -638,14 +677,14 @@ TEST_CASE("safe is what an environment gets unless it asks otherwise", "[environ
     SECTION("the default is the safe set") {
         auto env = interp.make_environment();
 
-        REQUIRE_FALSE(env->run("probe = tostring(io)").has_value());
+        REQUIRE_FALSE(env->run("probe = tostring(debug)").has_value());
         REQUIRE(env->read_string("probe") == "nil");
     }
 
     SECTION("unrestricted is available for code as trusted as the host") {
         auto env = interp.make_environment(environment_policy{standard_library::unrestricted});
 
-        REQUIRE_FALSE(env->run("probe = tostring(io)").has_value());
+        REQUIRE_FALSE(env->run("probe = tostring(debug)").has_value());
         REQUIRE(env->read_string("probe") != "nil");
 
 #ifdef JFC_LUA_LUAJIT
@@ -658,15 +697,15 @@ TEST_CASE("safe is what an environment gets unless it asks otherwise", "[environ
         auto trusted = interp.make_environment(environment_policy{standard_library::unrestricted});
         auto untrusted = interp.make_environment();
 
-        REQUIRE_FALSE(trusted->run("loaded_io = tostring(io)").has_value());
-        REQUIRE(trusted->read_string("loaded_io") != "nil");
+        REQUIRE_FALSE(trusted->run("loaded_debug = tostring(debug)").has_value());
+        REQUIRE(trusted->read_string("loaded_debug") != "nil");
 
-        REQUIRE_FALSE(untrusted->run("probe = tostring(io)").has_value());
+        REQUIRE_FALSE(untrusted->run("probe = tostring(debug)").has_value());
         REQUIRE(untrusted->read_string("probe") == "nil");
     }
 
     SECTION("the host itself is unrestricted regardless") {
-        REQUIRE_FALSE(interp.run("probe = tostring(io)").has_value());
+        REQUIRE_FALSE(interp.run("probe = tostring(debug)").has_value());
         REQUIRE(interp.read_string("probe") != "nil");
     }
 }

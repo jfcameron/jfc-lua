@@ -166,12 +166,12 @@ TEST_CASE("writing to a library path still shadows rather than writing through",
     auto env = interp.make_environment();
     auto other = interp.make_environment();
 
-    env->write("math.tau", 6.28);
+    env->write("math.answer", 42.0);
 
-    REQUIRE(env->read_number("math.tau") == 6.28);
+    REQUIRE(env->read_number("math.answer") == 42);
     REQUIRE(env->read_number("math.pi").has_value());
 
-    REQUIRE_FALSE(other->read_number("math.tau").has_value());
+    REQUIRE_FALSE(other->read_number("math.answer").has_value());
     REQUIRE(other->read_number("math.pi").has_value());
 }
 

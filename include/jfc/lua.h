@@ -11,6 +11,7 @@
 #include <jfc/lua/key.h>
 #include <jfc/lua/path.h>
 #include <jfc/lua/reference.h>
+#include <jfc/lua/script.h>
 #include <jfc/lua/signature.h>
 #include <jfc/lua/table_reader.h>
 #include <jfc/lua/table_view.h>

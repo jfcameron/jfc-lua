@@ -4,7 +4,7 @@ cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 project(jfclua
     VERSION 0.0
-    DESCRIPTION "jfc lua: Lua 5.1 embedded in c++, on LuaJIT or the reference implementation, with sandboxed environments, memory and instruction budgets, and values, functions and objects crossing both ways")
+    DESCRIPTION "jfc lua: Lua embedded in c++ -- Luau, or Lua 5.1 on LuaJIT or the reference implementation -- with sandboxed environments, memory and time budgets, and values, functions and objects crossing both ways")
 
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/jfc-cmake/jfclib.cmake")
 
@@ -25,12 +25,13 @@ else()
     set(_jfc_lua_default_backend "luajit")
 endif()
 
-set(JFC_LUA_BACKEND "${_jfc_lua_default_backend}" CACHE STRING "lua implementation to build against: luajit or lua51")
-set_property(CACHE JFC_LUA_BACKEND PROPERTY STRINGS "luajit" "lua51")
+set(JFC_LUA_BACKEND "${_jfc_lua_default_backend}" CACHE STRING
+    "lua implementation to build against: luajit, lua51 or luau")
+set_property(CACHE JFC_LUA_BACKEND PROPERTY STRINGS "luajit" "lua51" "luau")
 
-if (NOT JFC_LUA_BACKEND MATCHES "^(luajit|lua51)$")
+if (NOT JFC_LUA_BACKEND MATCHES "^(luajit|lua51|luau)$")
     message(FATAL_ERROR
-        "JFC_LUA_BACKEND is \"${JFC_LUA_BACKEND}\" but must be one of: luajit, lua51")
+        "JFC_LUA_BACKEND is \"${JFC_LUA_BACKEND}\" but must be one of: luajit, lua51, luau")
 endif()
 
 if (EMSCRIPTEN AND JFC_LUA_BACKEND STREQUAL "luajit")
@@ -50,6 +51,8 @@ message(STATUS "jfc-lua: the lua backend is ${JFC_LUA_BACKEND}")
 
 if (JFC_LUA_BACKEND STREQUAL "luajit")
     add_definitions(-DJFC_LUA_LUAJIT)
+elseif (JFC_LUA_BACKEND STREQUAL "luau")
+    add_definitions(-DJFC_LUA_LUAU)
 endif()
 
 add_subdirectory(extern)
@@ -80,12 +83,14 @@ endif()
 if (NOT TARGET jfclua)
 
     add_library(jfclua STATIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/backend.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/coroutine.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/environment.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/exception.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/path.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/reference.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/script.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/table_reader.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/table_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/typed_call.cpp
@@ -123,7 +128,7 @@ if (PROJECT_IS_TOP_LEVEL)
     include(GNUInstallDirs)
     include(CMakePackageConfigHelpers)
 
-    install(TARGETS jfclua ${JFC_LUA_TARGET}
+    install(TARGETS jfclua ${JFC_LUA_TARGET} ${JFC_LUA_PARTS}
         EXPORT jfclua-targets
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
 

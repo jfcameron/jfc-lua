@@ -8,6 +8,7 @@
 #include <jfc/lua/data_table.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cctype>
 #include <cstdlib>
 #include <memory>
@@ -40,7 +41,7 @@ namespace {
     //! every function written in lua in the table at aTable, and in its tables to aDepth more, each table once
     void _walk(lua_State *const L, const int aTable, const std::string &aPrefix, const int aDepth,
         std::set<const void *> &aVisited, std::map<std::string, jfc::lua::definition> &aOut) {
-        if (!lua_checkstack(L, 4)) return;
+        if (!jfc::lua::backend::check_stack(L, 4)) return;
 
         lua_pushnil(L);
 
@@ -55,11 +56,11 @@ namespace {
                     const auto path = aPrefix.empty() ? key : aPrefix + "." + key;
 
                     if (lua_isfunction(L, -1) && !lua_iscfunction(L, -1)) {
-                        lua_Debug about{};
+                        std::string source;
+                        int line = 0;
 
-                        lua_pushvalue(L, -1);
-
-                        if (lua_getinfo(L, ">S", &about)) aOut[path] = {_source_of(about.source), about.linedefined};
+                        if (jfc::lua::backend::defined_at(L, source, line))
+                            aOut[path] = {_source_of(source.c_str()), line};
                     }
                     else if (lua_istable(L, -1) && aDepth > 0 && aVisited.insert(lua_topointer(L, -1)).second)
                         _walk(L, lua_gettop(L), path, aDepth - 1, aVisited, aOut);
@@ -70,11 +71,9 @@ namespace {
         }
     }
 
-    int _reject_standard_library_write(lua_State *const L) {
-        return luaL_error(L, "the standard library is shared by every environment and cannot be "
-            "modified from within one");
-    }
-
+#if defined(JFC_LUA_LUAU)
+    //! the table on top replaced by a frozen proxy of it, its metatable frozen too: Luau refuses a write to either,
+    //! rawset's too, and what the host adds to the table is seen through it
     void _make_readonly(lua_State *const L) {
         lua_newtable(L);
 
@@ -83,7 +82,31 @@ namespace {
         lua_pushvalue(L, -3);
         lua_setfield(L, -2, "__index");
 
-        lua_pushcfunction(L, _reject_standard_library_write);
+        lua_pushboolean(L, 0);
+        lua_setfield(L, -2, "__metatable");
+
+        lua_setreadonly(L, -1, true);
+        lua_setmetatable(L, -2);
+
+        lua_setreadonly(L, -1, true);
+        lua_remove(L, -2);
+    }
+#else
+    int _reject_standard_library_write(lua_State *const L) {
+        return JFC_LUA_RAISE(L, "the standard library is shared by every environment and cannot be "
+            "modified from within one");
+    }
+
+    //! the table on top replaced by a proxy of it, which refuses a write
+    void _make_readonly(lua_State *const L) {
+        lua_newtable(L);
+
+        lua_newtable(L);
+
+        lua_pushvalue(L, -3);
+        lua_setfield(L, -2, "__index");
+
+        jfc::lua::backend::push_function(L, _reject_standard_library_write, "jfc.lua.readonly");
         lua_setfield(L, -2, "__newindex");
 
         lua_pushboolean(L, 0);
@@ -94,7 +117,45 @@ namespace {
         lua_remove(L, -2);
     }
 
-    constexpr int INSTRUCTION_CHECK_INTERVAL = 1000;
+    //! rawset, refusing a proxy: its own fields would be every environment's
+    int _guarded_rawset(lua_State *const L) {
+        luaL_checktype(L, 1, LUA_TTABLE);
+        luaL_checkany(L, 2);
+        luaL_checkany(L, 3);
+
+        if (lua_getmetatable(L, 1)) {
+            lua_getfield(L, -1, "__newindex");
+
+            const bool shared = lua_tocfunction(L, -1) == _reject_standard_library_write;
+
+            lua_pop(L, 2);
+
+            if (shared) return _reject_standard_library_write(L);
+        }
+
+        lua_settop(L, 3);
+        lua_rawset(L, 1);
+
+        return 1;
+    }
+#endif
+
+    //! under Lua 5.1, vm instructions between looks at the clock
+    [[maybe_unused]] constexpr int INSTRUCTION_CHECK_INTERVAL = 1000;
+
+    //! under Luau, interrupts between looks at the clock
+    [[maybe_unused]] constexpr unsigned INTERRUPT_CHECK_INTERVAL = 64;
+
+    //! the allocator a Luau state is made with, there being no default to take
+    [[maybe_unused]] void *_plain_alloc(void *, void *aBlock, std::size_t, std::size_t aNewSize) {
+        if (aNewSize == 0) {
+            std::free(aBlock);
+
+            return nullptr;
+        }
+
+        return std::realloc(aBlock, aNewSize);
+    }
 
     void *_capped_alloc(void *aUserData, void *aBlock, std::size_t aOldSize, std::size_t aNewSize) {
         auto *const limits = static_cast<interpreter_limits *>(aUserData);
@@ -121,57 +182,97 @@ namespace {
         return allocated;
     }
 
-    void _instruction_hook(lua_State *L, lua_Debug *) {
+    //! stops the run where it has taken longer than its budget, unless whoever set it lets it carry on
+    void _check_time_budget(lua_State *const L) {
         void *ud = nullptr;
 
         lua_getallocf(L, &ud);
 
         auto *const limits = static_cast<interpreter_limits *>(ud);
 
-        if (!limits || !limits->instructionBudget) return;
+        if (!limits || limits->timeBudget.count() <= 0) return;
 
-        if (limits->aborted) luaL_error(L, "script exceeded its instruction budget");
+        if (limits->aborted) luaL_error(L, "script exceeded its time budget");
 
-        limits->instructionsSeen += INSTRUCTION_CHECK_INTERVAL;
+        const auto taken = std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::steady_clock::now() - limits->runStarted);
 
-        if (limits->instructionsSeen <= limits->instructionBudget) return;
+        if (taken <= limits->timeBudget) return;
 
         bool carryOn = false;
 
         if (limits->onExhausted) {
             // a c++ exception thrown here would unwind through the vm and leave it in pieces, so it's treated as "stop"
-            try { carryOn = limits->onExhausted(limits->instructionsSeen); }
+            try { carryOn = limits->onExhausted(taken); }
             catch (...) { carryOn = false; }
         }
 
         if (carryOn) {
-            limits->instructionsSeen = 0;
+            limits->runStarted = std::chrono::steady_clock::now();
 
             return;
         }
 
         limits->aborted = true;
 
-        luaL_error(L, "script exceeded its instruction budget");
+        luaL_error(L, "script exceeded its time budget");
     }
 
-    void _ensure_instruction_hook(lua_State *const L, interpreter_limits *const aLimits) {
+#if defined(JFC_LUA_LUAU)
+    void _interrupt(lua_State *const L, const int aCollecting) {
+        if (aCollecting >= 0) return;
+
+        void *ud = nullptr;
+
+        lua_getallocf(L, &ud);
+
+        auto *const limits = static_cast<interpreter_limits *>(ud);
+
+        if (limits && ++limits->interrupts % INTERRUPT_CHECK_INTERVAL == 0) _check_time_budget(L);
+    }
+#else
+    void _instruction_hook(lua_State *const L, lua_Debug *) { _check_time_budget(L); }
+#endif
+
+    void _ensure_budget_check(lua_State *const L, interpreter_limits *const aLimits) {
         if (!aLimits || aLimits->hookInstalled) return;
 
+#if defined(JFC_LUA_LUAU)
+        lua_callbacks(L)->interrupt = _interrupt;
+#else
         lua_sethook(L, _instruction_hook, LUA_MASKCOUNT, INSTRUCTION_CHECK_INTERVAL);
+#endif
 
         aLimits->hookInstalled = true;
     }
 
-    //! base values that cannot reach outside the vm
+    //! told of a lua error nothing was protecting against
+    void _panicked(lua_State *const L) {
+        void *ud = nullptr;
+
+        lua_getallocf(L, &ud);
+
+        const auto *const pLimits = static_cast<const interpreter_limits *>(ud);
+
+        if (pLimits && pLimits->onPanic) {
+            const char *const message = lua_tostring(L, -1);
+
+            try { pLimits->onPanic(message ? message : "no description"); }
+            catch (...) {}
+        }
+    }
+
+    //! base values that cannot reach outside the vm, of either dialect: one a dialect lacks is passed over
     constexpr const char *SAFE_VALUES[] = {
         "_VERSION", "assert", "error", "getmetatable", "ipairs", "next", "pairs", "pcall", "print",
-        "rawequal", "rawget", "rawset", "select", "setmetatable", "tonumber", "tostring", "type",
-        "unpack", "xpcall"
+        "rawequal", "rawget", "rawlen", "rawset", "select", "setmetatable", "tonumber", "tostring", "type",
+        "typeof", "unpack", "xpcall"
     };
 
-    //! libraries with no route to the host, taken whole
-    constexpr const char *SAFE_LIBRARIES[] = { "coroutine", "math", "table", "bit" };
+    //! libraries with no route to the host, taken whole: LuaJIT's bit, and Luau's bit32, utf8, buffer and vector
+    constexpr const char *SAFE_LIBRARIES[] = {
+        "coroutine", "math", "table", "bit", "bit32", "utf8", "buffer", "vector"
+    };
 
     //! string, less the one entry that produces loadable bytecode
     constexpr const char *UNSAFE_STRING_FIELDS[] = { "dump" };
@@ -263,7 +364,14 @@ namespace {
         }
         lua_pop(L, 1);
 
-        return luaL_ref(L, LUA_REGISTRYINDEX);
+#if defined(JFC_LUA_LUAU)
+        lua_setreadonly(L, -1, true);
+#else
+        jfc::lua::backend::push_function(L, _guarded_rawset, "rawset");
+        lua_setfield(L, -2, "rawset");
+#endif
+
+        return jfc::lua::backend::ref(L);
     }
 
     [[nodiscard]] int _snapshot_globals(lua_State *const L) {
@@ -286,7 +394,11 @@ namespace {
             lua_pop(L, 1);    
         }
 
-        return luaL_ref(L, LUA_REGISTRYINDEX);
+#if defined(JFC_LUA_LUAU)
+        lua_setreadonly(L, -1, true);
+#endif
+
+        return jfc::lua::backend::ref(L);
     }
 }
 
@@ -295,10 +407,17 @@ namespace jfc::lua {
     : m_pLimits(std::make_shared<interpreter_limits>()) {
         m_pLimits->cap = aPolicy.MEMORY_BUDGET_IN_BYTES;
         m_pLimits->growthCap = aPolicy.MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN;
-        m_pLimits->instructionBudget = aPolicy.INSTRUCTION_BUDGET;
-        m_pLimits->onExhausted = aPolicy.ON_INSTRUCTION_BUDGET_EXHAUSTED;
+        m_pLimits->timeBudget = aPolicy.TIME_BUDGET;
+        m_pLimits->onExhausted = aPolicy.ON_TIME_BUDGET_EXHAUSTED;
         m_pLimits->onPanic = aPolicy.ON_PANIC;
 
+#if defined(JFC_LUA_LUAU)
+        m_pLimits->innerAlloc = _plain_alloc;
+
+        auto *const state = lua_newstate(_capped_alloc, m_pLimits.get());
+
+        if (!state) throw exception("could not create a lua state");
+#else
         auto *const state = luaL_newstate();
 
         if (!state) throw exception("could not create a lua state");
@@ -308,9 +427,12 @@ namespace jfc::lua {
             + static_cast<std::size_t>(lua_gc(state, LUA_GCCOUNTB, 0));
 
         lua_setallocf(state, _capped_alloc, m_pLimits.get());
+#endif
 
         m_pState = std::shared_ptr<lua_State>(state, [limits = m_pLimits](lua_State *pState) {
+#if !defined(JFC_LUA_LUAU)
             lua_setallocf(pState, limits->innerAlloc, limits->innerData);
+#endif
             lua_close(pState);
 
             // it points at the control block holding this deleter, which holds limits: a cycle unless broken
@@ -321,22 +443,15 @@ namespace jfc::lua {
 
         auto *L = m_pState.get();
 
+#if defined(JFC_LUA_LUAU)
+        lua_callbacks(L)->panic = [](lua_State *pState, int) { _panicked(pState); };
+#else
         lua_atpanic(L, [](lua_State *pState) {
-            void *ud = nullptr;
-
-            lua_getallocf(pState, &ud);
-
-            const auto *const pLimits = static_cast<const interpreter_limits *>(ud);
-
-            if (pLimits && pLimits->onPanic) {
-                const char *const message = lua_tostring(pState, -1);
-
-                try { pLimits->onPanic(message ? message : "no description"); }
-                catch (...) {}
-            }
+            _panicked(pState);
 
             return 0;
         });
+#endif
 
         const stack_guard guard(L);
 
@@ -347,18 +462,26 @@ namespace jfc::lua {
     void interpreter::_set_up(lua_State *const L) {
         luaL_openlibs(L);
 
+#if defined(JFC_LUA_LUAU)
+        lua_getglobal(L, "math");
+        lua_getfield(L, -1, "randomseed");
+        lua_pushinteger(L, 0);
+        lua_call(L, 1, 0);
+        lua_pop(L, 1);
+#endif
+
         lua_getglobal(L, "jit");
 
         if (lua_istable(L, -1)) {
             lua_getfield(L, -1, "off");
 
-            if (lua_isfunction(L, -1)) m_pLimits->jitOffReference = luaL_ref(L, LUA_REGISTRYINDEX);
+            if (lua_isfunction(L, -1)) m_pLimits->jitOffReference = backend::ref(L);
             else lua_pop(L, 1);
         }
 
         lua_pop(L, 1);
 
-        if (m_pLimits->instructionBudget) _ensure_instruction_hook(L, m_pLimits.get());
+        if (m_pLimits->timeBudget.count()) _ensure_budget_check(L, m_pLimits.get());
 
         lua_pushliteral(L, "");
 
@@ -378,7 +501,7 @@ namespace jfc::lua {
         lua_pushvalue(L, LUA_GLOBALSINDEX);
 
         m_pGlobals = environment_shared_ptr_type(
-            new environment(m_pState, luaL_ref(L, LUA_REGISTRYINDEX), {}, {}));
+            new environment(m_pState, backend::ref(L), {}, {}));
     }
 
     environment_shared_ptr_type interpreter::make_environment(environment_policy aPolicy) {
@@ -386,7 +509,8 @@ namespace jfc::lua {
 
         const stack_guard guard(L);
 
-        if (aPolicy.INSTRUCTION_BUDGET.value_or(0)) _ensure_instruction_hook(L, m_pLimits.get());
+        if (aPolicy.TIME_BUDGET.value_or(std::chrono::nanoseconds(0)).count())
+            _ensure_budget_check(L, m_pLimits.get());
 
         int root = LUA_NOREF;
 
@@ -398,15 +522,21 @@ namespace jfc::lua {
                 ? m_SafeLibraryReference
                 : m_StandardLibraryReference);
             lua_setfield(L, -2, "__index");
+            lua_pushboolean(L, 0);
+            lua_setfield(L, -2, "__metatable");
             lua_setmetatable(L, -2);
 
             lua_pushvalue(L, -1);
             lua_setfield(L, -2, "_G");
 
-            root = luaL_ref(L, LUA_REGISTRYINDEX);
+#if defined(JFC_LUA_LUAU)
+            lua_setsafeenv(L, -1, true);
+#endif
+
+            root = backend::ref(L);
         })) throw exception("could not make an environment: " + *error);
 
-        auto made = environment_shared_ptr_type(new environment(m_pState, root, aPolicy.INSTRUCTION_BUDGET,
+        auto made = environment_shared_ptr_type(new environment(m_pState, root, aPolicy.TIME_BUDGET,
             aPolicy.NAME));
 
         if (!aPolicy.NAME.empty()) m_pLimits->latest[aPolicy.NAME] = made;
@@ -539,6 +669,12 @@ namespace jfc::lua {
 
     interpreter::error_type interpreter::run(const std::string &aLuaScript, const std::string_view aName)
         { return m_pGlobals->run(aLuaScript, aName); }
+
+    interpreter::error_type interpreter::run(const script &aScript)
+        { return m_pGlobals->run(aScript); }
+
+    void interpreter::collect_garbage()
+        { lua_gc(m_pState.get(), LUA_GCCOLLECT, 0); }
 
     interpreter::error_type interpreter::validate_syntax(const std::string &aLuaScript, const std::string_view aName) const
         { return m_pGlobals->validate_syntax(aLuaScript, aName); }

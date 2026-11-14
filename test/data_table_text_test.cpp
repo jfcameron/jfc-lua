@@ -4,6 +4,8 @@
 
 #include <jfc/lua.h>
 
+#include <chrono>
+
 #include <cctype>
 #include <clocale>
 #include <cmath>
@@ -16,6 +18,7 @@
 #include <vector>
 
 using namespace jfc::lua;
+using namespace std::chrono_literals;
 
 TEST_CASE("a table survives text and back", "[text]") {
     SECTION("every value kind") {
@@ -355,7 +358,7 @@ TEST_CASE("a tampered save is a parse error, not a script", "[text]") {
 
     SECTION("where running it executes the payload") {
         interpreter interp(interpreter_policy{.MEMORY_BUDGET_IN_BYTES = 0,
-            .MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN = 0, .INSTRUCTION_BUDGET = 200000});
+            .MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN = 0, .TIME_BUDGET = 40ms});
 
         auto env = interp.make_environment();
 

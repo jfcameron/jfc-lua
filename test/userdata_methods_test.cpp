@@ -46,7 +46,7 @@ namespace {
         });
     }
 
-    void collect(interpreter &aLua) { REQUIRE_FALSE(aLua.run("collectgarbage('collect')")); }
+    void collect(interpreter &aLua) { aLua.collect_garbage(); }
 }
 
 TEST_CASE("**a registered type's methods are called on it with a colon**", "[userdata][methods]") {
@@ -135,7 +135,7 @@ TEST_CASE("**a method called on anything but its own type says so, and runs noth
     }
 
     SECTION("**on somebody else's userdata**") {
-        refused("greeting.set_text(io.tmpfile(), 'x')");
+        refused("greeting.set_text(newproxy(true), 'x')");
     }
 
     SECTION("**and a method a type does not have is nil, not another's**") {

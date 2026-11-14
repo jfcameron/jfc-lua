@@ -7,6 +7,7 @@
 #include <jfc/lua/signature.h>
 #include <jfc/lua/path.h>
 #include <jfc/lua/reference.h>
+#include <jfc/lua/script.h>
 #include <jfc/lua/data_table.h>
 #include <jfc/lua/types.h>
 #include <jfc/lua/userdata.h>
@@ -35,24 +36,30 @@ namespace jfc::lua {
         /// life, this bounds one script's usage
         const std::size_t MEMORY_GROWTH_BUDGET_IN_BYTES_PER_RUN{0};
 
-        /// \brief vm instructions one call to `run` may execute before it is interrupted
-        /// Zero is unbounded.
-        const std::size_t INSTRUCTION_BUDGET{0};
+        /// \brief how long one call to `run` may spend running its script before it is interrupted. Zero is unbounded.
+        ///
+        /// The script's own time, by the steady clock: loading it is not counted, and neither is a registered
+        /// function's, until that runs a script itself. Looked at every thousand vm instructions under Lua 5.1, and at
+        /// Luau's interrupts -- calls and the ends of loops -- so a script stops a little after it runs over, and never
+        /// inside one call into c++.
+        const std::chrono::nanoseconds TIME_BUDGET{0};
 
-        /// \brief what to do when a script reaches INSTRUCTION_BUDGET
-        const std::function<bool(const std::size_t aInstructionsExecuted)>
-            ON_INSTRUCTION_BUDGET_EXHAUSTED{};
+        /// \brief what to do when a script reaches TIME_BUDGET, told how long it has run: true lets it carry on for
+        /// another TIME_BUDGET, false or nothing here stops it
+        const std::function<bool(const std::chrono::nanoseconds aTaken)> ON_TIME_BUDGET_EXHAUSTED{};
 
         /// \brief told of a lua error nothing was protecting against, after which lua ends the process
         ///
         /// Only a fault in this library should reach it, and there is no carrying on from it. With nothing here the
-        /// process ends without a word: the library writes to no stream of its own.
+        /// process ends without a word: the library writes to no stream of its own. Luau never calls it: its errors are
+        /// c++ exceptions, so such an error is thrown out of the call that raised it, as a std::exception.
         const std::function<void(const std::string_view aMessage)> ON_PANIC{};
     };
 
     /// \brief a lua interpreter
     ///
-    /// Owns the lua state and makes the environments that run on it
+    /// Owns the lua state and makes the environments that run on it. Under LuaJIT and Luau its `math.random` starts
+    /// the same every run, until a script seeds it; under Lua 5.1 it is C's `rand`, which the process shares.
     class interpreter final
     {
     public:
@@ -216,7 +223,14 @@ namespace jfc::lua {
         ///
         /// \param aName the script's name in errors. \see environment::run
         [[nodiscard]] error_type run(const std::string &aLuaScript, std::string_view aName = {});
-        
+
+        /// \brief run a compiled script. \see environment::run
+        [[nodiscard]] error_type run(const script &aScript);
+
+        /// \brief a full collection now: what nothing holds any longer is freed, and the userdata among it destroyed.
+        /// Not every dialect lets a script ask for one
+        void collect_garbage();
+
         /// \brief construct an interpreter
         ///
         /// \warning throws if the lua state cannot be created
