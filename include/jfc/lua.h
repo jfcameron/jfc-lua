@@ -5,6 +5,7 @@
 
 #include <jfc/lua/coroutine.h>
 #include <jfc/lua/data_table.h>
+#include <jfc/lua/declarations.h>
 #include <jfc/lua/environment.h>
 #include <jfc/lua/exception.h>
 #include <jfc/lua/interpreter.h>

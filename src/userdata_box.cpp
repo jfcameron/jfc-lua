@@ -370,7 +370,7 @@ namespace jfc::lua {
 
             const int methods = lua_gettop(L);
 
-            for (auto &[name, method, describe] : aMethods) {
+            for (auto &[name, method, describe, object] : aMethods) {
                 backend::new_userdata<detail::typed_method_type>(L, std::move(method));
 
                 lua_newtable(L);

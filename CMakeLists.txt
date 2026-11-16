@@ -85,6 +85,7 @@ if (NOT TARGET jfclua)
     add_library(jfclua STATIC
         ${CMAKE_CURRENT_SOURCE_DIR}/src/backend.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/coroutine.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/declarations.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/environment.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/exception.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/src/interpreter.cpp
@@ -121,6 +122,17 @@ if (NOT TARGET jfclua)
     endif()
 
     target_link_libraries(jfclua PUBLIC ${JFC_LUA_TARGET})
+
+    # Luau's type checker, apart from the runtime: its analysis is large, and only what checks scripts needs it
+    if (JFC_LUA_BACKEND STREQUAL "luau")
+        add_library(jfclua_checker STATIC ${CMAKE_CURRENT_SOURCE_DIR}/src/checker.cpp)
+
+        add_library(jfc::lua_checker ALIAS jfclua_checker)
+
+        target_link_libraries(jfclua_checker PUBLIC jfclua PRIVATE Luau.Analysis)
+
+        target_compile_features(jfclua_checker PUBLIC cxx_std_20)
+    endif()
 
 endif()
 

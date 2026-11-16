@@ -129,6 +129,10 @@ namespace jfc::lua
         /// \brief run a compiled script here, as run runs its source, without compiling it again
         [[nodiscard]] error_type run(const script &aScript);
 
+        /// \brief run a script here as run does, what it returns -- its first value, or true where it gives none --
+        /// kept at aResult without leaving lua: a library kept where whatever requires it finds it
+        [[nodiscard]] error_type run(const std::string &aLuaScript, std::string_view aName, const path &aResult);
+
         environment(const environment &) = delete;
         environment &operator=(const environment &) = delete;
 

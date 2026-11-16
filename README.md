@@ -47,7 +47,7 @@ env->register_function("gas.set", [&](const int aCell, const std::string_view aM
 });
 ```
 
-A call that does not fit is a Lua error naming the function and the argument, such as `gas.set: argument 2 wants a string, got a number`. A number given for an integer must be whole and fit its type, a `std::optional` may be left out or nil, and no more arguments may be given than the function takes. A `std::string_view` needs no copy and is valid for the call. A function can return a `std::tuple` for several results, and an empty `std::optional` is nil.
+A call that does not fit is a Lua error naming the function and the argument, such as `gas.set: argument 2 wants a string, got a number`. A number given for an integer must be whole and fit its type, a `std::optional` may be left out or nil, and no more arguments may be given than the function takes. A `std::string_view` needs no copy and is valid for the call. A function can return a `std::tuple` for several results, and an empty `std::optional` is nil; empty ones at a tuple's end are left off, as a Lua function gives fewer results, though a tuple that is all empty still gives one nil.
 
 A `table_view` reads a script's table where it is, for the length of the call, instead of copying it into a data table:
 
@@ -102,6 +102,8 @@ A `std::optional` may be absent, as it may be nil in a typed function. A `double
 ### Userdata
 A C++ object is given to Lua as a `std::shared_ptr`, and both sides own it: the object lives until neither C++ nor any script holds it, so neither can leave the other with a dangling pointer. The same object is always the same Lua value, so a script can compare objects and use them as keys. Registering a type gives its objects methods, called as `object:name(arguments)`, and scripts can also set fields of their own on an object. Reading an object back as the wrong type gives nothing rather than a bad cast.
 
+When Lua lets go of the last of an object, its `shared_ptr` is released as the collector frees it. Under Lua 5.1 that is a `__gc` metamethod, an ordinary call; under Luau it is inside the collector's sweep, where a destructor may let go of more, such as a `reference` or an `environment`, but must not call into the interpreter: not write, run or call anything.
+
 Methods can say what they take the same way, each named with `method`. The first parameter is the object, and arguments are numbered from the one after it. Methods taking value lists can sit among them, so a type can move to this one method at a time:
 
 ```cpp
@@ -109,6 +111,18 @@ lua.register_type<label>("label",
     method("set_text", [](label &aLabel, const std::string_view aText) { aLabel.text = aText; }),
     method("text", [](const label &aLabel) { return aLabel.text; }));
 ```
+
+A type with many methods makes each with `method_of`, which fits them in one vector, and registers the vector. A method made for another type is refused as the type is registered:
+
+```cpp
+std::vector<jfc::lua::bound_method> methods;
+
+methods.push_back(method_of<label>("set_text", [](label &aLabel, const std::string_view aText) { aLabel.text = aText; }));
+
+lua.register_type<label>("label", std::move(methods));
+```
+
+A method's signature names an object of a registered type by the name it was registered with, so declarations for Luau's checker say `label`, or `label?` for a `std::optional` of one.
 
 ### Coroutines
 Any Lua function can be made into a coroutine, which C++ resumes, and which runs until it yields or returns. A function can be registered as yielding, so that a script calling it is suspended until C++ resumes it again: a `wait(seconds)` that a script calls in the middle of a loop, for example, without the script having to be written as a state machine.

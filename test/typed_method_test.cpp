@@ -13,6 +13,7 @@
 #include <tuple>
 #include <utility>
 #include <variant>
+#include <vector>
 
 using namespace jfc::lua;
 using namespace std::chrono_literals;
@@ -224,6 +225,58 @@ TEST_CASE("a `__call` method can be typed", "[typed][methods][call]") {
 
     REQUIRE_FALSE(env->run("out = greeting(4)"));
     REQUIRE(env->read_number("out") == 8.0);
+}
+
+TEST_CASE("typed methods made one by one fit a vector, each saying its signature", "[typed][methods]") {
+    interpreter lua;
+
+    std::vector<bound_method> methods;
+
+    methods.push_back(method_of<label>("set_text", [](label &aLabel, const std::string_view aText) {
+        aLabel.text = aText;
+    }));
+    methods.push_back(method_of<label>("resize", [](label &aLabel, const double aSize, std::optional<double> aBy) {
+        aLabel.size = aSize * aBy.value_or(1);
+    }));
+    methods.push_back(method_of<label>("measure", [](const label &aLabel) {
+        return std::tuple{aLabel.text.size(), aLabel.size};
+    }));
+    methods.push_back(method_of<label>("itself", [](label &aLabel, const bool aGiven) {
+        return aGiven ? std::optional{std::make_shared<label>(aLabel)} : std::nullopt;
+    }));
+
+    lua.register_type<label>("label", std::move(methods));
+
+    auto env = lua.make_environment();
+
+    const auto greeting = std::make_shared<label>();
+
+    env->write("greeting", greeting);
+
+    REQUIRE_FALSE(env->run("greeting:set_text('hello') greeting:resize(2, 3) n, size = greeting:measure() "
+        "copy, none = greeting:itself(true), greeting:itself(false)"));
+    REQUIRE(greeting->text == "hello");
+    REQUIRE(env->read_number("n") == 5.0);
+    REQUIRE(env->read_number("size") == 6.0);
+    REQUIRE_FALSE(env->run("assert(copy:measure() == 5 and none == nil)"));
+    REQUIRE(mentions(env->run("greeting:set_text(1)"), "label:set_text: argument 1 wants a string, got a number"));
+
+    const auto described = lua.registered().types.at("label");
+
+    REQUIRE(described.at("set_text").arguments == std::vector<signature::value>{{"string"}});
+    REQUIRE(described.at("resize").arguments == std::vector<signature::value>{{"number"}, {"number", true}});
+    REQUIRE(described.at("measure").results == std::vector<signature::value>{{"integer"}, {"number"}});
+    REQUIRE(described.at("itself").results == std::vector<signature::value>{{"label", true}});
+}
+
+TEST_CASE("a method made for another type is refused", "[typed][methods]") {
+    interpreter lua;
+
+    std::vector<bound_method> methods;
+
+    methods.push_back(method_of<label>("text", [](const label &aLabel) { return aLabel.text; }));
+
+    REQUIRE_THROWS_AS(lua.register_type<button>("button", std::move(methods)), std::invalid_argument);
 }
 
 TEST_CASE("the methods of a value list still work as they did", "[typed][methods]") {

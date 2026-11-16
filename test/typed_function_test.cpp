@@ -312,6 +312,24 @@ TEST_CASE("a typed function's results go back as what they are", "[typed]") {
         REQUIRE(env->read_boolean("c") == true);
     }
 
+    SECTION("a tuple's empty optionals at its end are left off, as a lua function gives fewer results, but one") {
+        using answer = std::tuple<std::optional<double>, std::optional<std::string>>;
+
+        env->register_function("ask", [](const double aWhich) -> answer {
+            if (aWhich == 1) return {1.0, std::nullopt};
+            if (aWhich == 2) return {std::nullopt, std::string("why")};
+
+            return {};
+        });
+
+        REQUIRE_FALSE(env->run("one, two, none = select('#', ask(1)), select('#', ask(2)), select('#', ask(3)) "
+            "second = select(2, ask(2))"));
+        REQUIRE(env->read_number("one") == 1.0);
+        REQUIRE(env->read_number("two") == 2.0);
+        REQUIRE(env->read_number("none") == 1.0);
+        REQUIRE(env->read_string("second") == "why");
+    }
+
     SECTION("a tuple longer than a new coroutine's stack") {
         env->register_function("long", [] {
             const auto ten = std::tuple{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
@@ -429,8 +447,8 @@ TEST_CASE("a wrong call says who was called, where, and what was wanted", "[type
 TEST_CASE("a typed function takes the object it asks for, and names any other", "[typed]") {
     interpreter interp;
 
-    interp.register_type<lantern>("lantern", {});
-    interp.register_type<bucket>("bucket", {});
+    interp.register_type<lantern>("lantern");
+    interp.register_type<bucket>("bucket");
 
     auto env = interp.make_environment();
 

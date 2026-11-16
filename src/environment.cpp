@@ -730,10 +730,11 @@ namespace jfc::lua {
     }
 
     namespace {
-        //! the chunk aLoad pushes, run against aRoot within aBudget, which loading it does not spend
-        template <typename load_type>
+        //! the chunk aLoad pushes, run against aRoot within aBudget, which loading it does not spend; aKeep called
+        //! with its first result on top, where it runs
+        template <typename load_type, typename keep_type>
         [[nodiscard]] environment::error_type _run(lua_State *const L, const int aRoot,
-            const std::optional<std::chrono::nanoseconds> aBudget, load_type &&aLoad) {
+            const std::optional<std::chrono::nanoseconds> aBudget, load_type &&aLoad, keep_type &&aKeep) {
             const stack_guard guard(L);
             const root_scope root(L, aRoot);
 
@@ -745,8 +746,10 @@ namespace jfc::lua {
 
             if (budget.time_budget().count()) _disable_jit_for_chunk(L, budget.limits());
 
-            if (lua_pcall(L, 0, 0, 0) != LUA_OK)
+            if (lua_pcall(L, 0, 1, 0) != LUA_OK)
                 return _to_string(L, -1).value_or("lua reported an error it could not describe");
+
+            aKeep();
 
             return {};
         }
@@ -755,14 +758,37 @@ namespace jfc::lua {
     environment::error_type environment::run(const std::string &aLuaScript, const std::string_view aName) {
         auto *const L = state();
 
-        return _run(L, registry_reference(), m_TimeBudget, [&] { return backend::load(L, aLuaScript, aName); });
+        return _run(L, registry_reference(), m_TimeBudget, [&] { return backend::load(L, aLuaScript, aName); }, [] {});
     }
 
     environment::error_type environment::run(const script &aScript) {
         auto *const L = state();
 
         return _run(L, registry_reference(), m_TimeBudget,
-            [&] { return backend::load_compiled(L, aScript.m_Compiled, aScript.m_ChunkName); });
+            [&] { return backend::load_compiled(L, aScript.m_Compiled, aScript.m_ChunkName); }, [] {});
+    }
+
+    environment::error_type environment::run(const std::string &aLuaScript, const std::string_view aName,
+        const path &aResult) {
+        auto *const L = state();
+        const int root = registry_reference();
+
+        error_type failed;
+
+        if (const auto error = detail::protect(L, [&](lua_State *) {
+            failed = _run(L, root, m_TimeBudget, [&] { return backend::load(L, aLuaScript, aName); }, [&] {
+                if (lua_isnil(L, -1)) {
+                    lua_pop(L, 1);
+                    lua_pushboolean(L, 1);
+                }
+
+                const int result = lua_gettop(L);
+
+                _write_value(L, root, aResult, [L, result] { lua_pushvalue(L, result); });
+            });
+        })) return error;
+
+        return failed;
     }
 
     environment::error_type environment::validate_syntax(const std::string &aLuaScript, const std::string_view aName) const {

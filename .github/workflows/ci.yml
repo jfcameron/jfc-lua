@@ -249,7 +249,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        preset: [linux-gcc, linux-gcc-lua51]
+        preset: [linux-gcc, linux-gcc-lua51, linux-gcc-luau]
 
     steps:
       - uses: actions/checkout@v7
@@ -278,7 +278,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        preset: [linux-gcc-bench, linux-gcc-lua51-bench]
+        preset: [linux-gcc-bench, linux-gcc-lua51-bench, linux-gcc-luau-bench]
 
     steps:
       - uses: actions/checkout@v7

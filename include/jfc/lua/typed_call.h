@@ -10,6 +10,7 @@
 #include <jfc/lua/types.h>
 #include <jfc/lua/userdata.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <exception>
@@ -202,16 +203,34 @@ namespace jfc::lua::detail
             "function_reference, std::optional of those, or a value_list_type for every argument left");
     }
 
+    //! whether a result is an empty std::optional: those at the end of a tuple are left off, as a lua function gives
+    //! fewer results -- all but the first, where every one is empty, so it gives nil as it would have
+    template <typename value_type>
+    [[nodiscard]] bool empty_optional(const value_type &aValue) {
+        if constexpr (is_optional<value_type>::value) return !aValue;
+        else return false;
+    }
+
     /// \return how many values were pushed
     template <typename value_type>
     [[nodiscard]] int push_result(call_frame &aFrame, const value_type &aValue) {
         if constexpr (std::is_same_v<value_type, value_list_type>) return aFrame.push(aValue);
         else if constexpr (is_tuple<value_type>::value) {
-            aFrame.reserve(std::tuple_size_v<value_type>);
+            std::size_t kept = 0, at = 0;
+
+            std::apply([&](const auto &...aHeld) { ((++at, kept = empty_optional(aHeld) ? kept : at), ...); }, aValue);
+
+            kept = std::max(kept, std::min<std::size_t>(1, std::tuple_size_v<value_type>));
+
+            aFrame.reserve(kept);
 
             int pushed = 0;
 
-            std::apply([&](const auto &...aHeld) { ((pushed += push_result(aFrame, aHeld)), ...); }, aValue);
+            at = 0;
+
+            std::apply([&](const auto &...aHeld) {
+                ((at++ < kept ? (pushed += push_result(aFrame, aHeld)) : 0), ...);
+            }, aValue);
 
             return pushed;
         }
@@ -445,6 +464,9 @@ namespace jfc::lua::detail
         std::string name;
         typed_method_type method;
         signature_maker describe;
+
+        /// \brief the type it was made for, where it was made apart from its registration (method_of)
+        const void *object{nullptr};
     };
 }
 
@@ -457,6 +479,19 @@ namespace jfc::lua
     template <typename function_type>
     [[nodiscard]] detail::named_method<std::decay_t<function_type>> method(std::string aName, function_type &&aFunction) {
         return {std::move(aName), std::forward<function_type>(aFunction)};
+    }
+
+    /// \brief a typed method made for object_type now, so that methods of every signature fit one vector
+    /// \see method_of, interpreter::register_type
+    using bound_method = detail::made_method;
+
+    /// \brief a method for interpreter::register_type of object_type, which says what it takes in its own signature, as
+    /// jfc::lua::method's does: for a type with many, gathered in a vector
+    template <typename object_type, typename function_type>
+    [[nodiscard]] bound_method method_of(std::string aName, function_type &&aFunction) {
+        return {std::move(aName), detail::make_typed_method<object_type>(std::forward<function_type>(aFunction)),
+            detail::method_signature_maker_of<object_type, std::decay_t<function_type>>(),
+            &userdata_tag<std::remove_cv_t<object_type>>::id};
     }
 
     template <typename result_type, typename... argument_types>

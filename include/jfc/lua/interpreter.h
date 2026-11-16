@@ -18,6 +18,7 @@
 #include <memory>
 #include <utility>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -201,6 +202,20 @@ namespace jfc::lua {
 
             _register_type(std::move(aName), userdata::make(std::shared_ptr<object_type>()).type_key(),
                 std::move(methods));
+        }
+
+        /// \brief give object_type methods made with method_of, as many as it has. Throws std::invalid_argument for one
+        /// made for another type
+        template <typename object_type>
+        void register_type(std::string aName, std::vector<bound_method> aMethods) {
+            const auto key = userdata::make(std::shared_ptr<object_type>()).type_key();
+
+            for (const auto &each : aMethods)
+                if (each.object != key)
+                    throw std::invalid_argument("register_type: " + aName + ":" + each.name
+                        + " was made for another type");
+
+            _register_type(std::move(aName), key, std::move(aMethods));
         }
 
         /// \brief what has been registered here: the functions of every environment made with a name

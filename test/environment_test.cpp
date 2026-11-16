@@ -770,3 +770,33 @@ TEST_CASE("a script can be given a name for its errors to use", "[environment][c
         REQUIRE(env->run("error('no')", "") == "[string \"error('no')\"]:1: no");
     }
 }
+
+TEST_CASE("a script can keep what it returns at a path, without it leaving lua", "[environment]") {
+    interpreter interp;
+
+    auto env = interp.make_environment();
+
+    REQUIRE_FALSE(env->run("return { twice = function(n) return n * 2 end }", "lib", path{"kept", "lib:x"}));
+    REQUIRE_FALSE(env->run("answer = kept['lib:x'].twice(4)"));
+    REQUIRE(env->read_number("answer") == 8);
+
+    SECTION("one that returns nothing keeps true") {
+        REQUIRE_FALSE(env->run("local x = 1", "nothing", path{"kept", "none"}));
+        REQUIRE(env->read_boolean(path{"kept", "none"}) == true);
+    }
+
+    SECTION("one that fails keeps nothing, and says why") {
+        const auto error = env->run("error('broken')", "broken", path{"kept", "bad"});
+
+        REQUIRE(error);
+        REQUIRE_THAT(*error, Catch::Matchers::Contains("broken"));
+        REQUIRE_FALSE(env->read_boolean(path{"kept", "bad"}).has_value());
+    }
+
+#if defined(JFC_LUA_LUAU)
+    SECTION("one exporting a type, which Luau allows only at a script's top") {
+        REQUIRE_FALSE(env->run("export type point = { x: number }\nreturn { x = 3 }", "typed", path{"kept", "typed"}));
+        REQUIRE(env->read_number(path{"kept", "typed", "x"}) == 3);
+    }
+#endif
+}
