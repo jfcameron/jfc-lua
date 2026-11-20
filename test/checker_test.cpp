@@ -4,6 +4,7 @@
 
 #if defined(JFC_LUA_LUAU)
     #include <jfc/lua/checker.h>
+    #include <jfc/lua/declarations.h>
 
     #include <algorithm>
     #include <map>
@@ -229,6 +230,42 @@ TEST_CASE("Luau offers the names in scope and the keywords where a word is begun
         p.files["f.luau"] = "local alpha = 1\n-- al\n";
 
         REQUIRE(p.complete("f.luau", 2, 6).empty());
+    }
+}
+
+TEST_CASE("a shaped table a function gives has its fields checked, and only those", "[checker]") {
+    project p;
+
+    declared find;
+
+    find.path = "find";
+
+    signature::value thing{"thing"};
+
+    thing.shape = std::make_shared<const shape>(shape{"thing", {{"label", {"string"}}, {"count", {"number"}}}});
+
+    find.signature.results.push_back(thing);
+
+    p.declarations["server"] = luau_declarations({find}, {});
+    p.environments["g.luau"] = "server";
+
+    p.files["g.luau"] = "--!strict\nlocal x: thing = find()\nlocal said: string = x.label\nlocal n: number = x.count\n";
+
+    REQUIRE(p.check("g.luau").empty());
+
+    SECTION("a field the shape has not") {
+        p.files["g.luau"] = "--!strict\nlocal x = find()\nlocal said: string = x.nosuch\n";
+
+        const auto found = p.check("g.luau");
+
+        REQUIRE(found.size() == 1);
+        REQUIRE(found.front().line == 3);
+    }
+
+    SECTION("a field of another type") {
+        p.files["g.luau"] = "--!strict\nlocal x = find()\nlocal n: number = x.label\n";
+
+        REQUIRE(p.check("g.luau").size() == 1);
     }
 }
 

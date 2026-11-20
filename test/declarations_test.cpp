@@ -9,6 +9,8 @@
 #endif
 
 #include <map>
+#include <memory>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -45,6 +47,35 @@ namespace {
     const std::map<std::string, std::vector<declared>> TYPES{
         {"verb", {made("use", {{"value"}}, {}, {"at"}, "uses it", true)}},
     };
+
+    [[nodiscard]] value shaped_as(const shape &aShape, const bool aOptional = false, const bool aList = false) {
+        value out{aShape.name, aOptional, aList};
+
+        out.shape = std::make_shared<const shape>(aShape);
+
+        return out;
+    }
+
+    const shape PLACE{"place", {{"x", {"number"}}, {"z", {"number"}}}, "where it is"};
+
+    const shape THING{"thing", {
+        {"id", {"number"}, "its number"},
+        {"tags", {"string", true, true}},
+        {"state", {"number", false, false, "string"}},
+        {"where", shaped_as(PLACE)},
+    }};
+
+    [[nodiscard]] std::vector<declared> shaped_functions() {
+        auto where = made("ui.where", {}, {shaped_as(PLACE)}, {});
+
+        where.value = true;
+
+        return {
+            made("world.item", {{"number"}}, {shaped_as(THING, true)}, {"id"}),
+            made("world.items_of", {}, {shaped_as(THING, false, true)}, {}),
+            where,
+        };
+    }
 }
 
 TEST_CASE("declarations say each type with its methods and each function under its path", "[declarations]") {
@@ -70,7 +101,70 @@ TEST_CASE("declarations say each type with its methods and each function under i
         "}\n");
 }
 
+TEST_CASE("declarations write each shape named as a type of its own, a list, a map, and a value", "[declarations]") {
+    REQUIRE(luau_declarations(shaped_functions(), {}) ==
+        "-- where it is\n"
+        "export type place = {\n"
+        "    x: number,\n"
+        "    z: number,\n"
+        "}\n"
+        "\n"
+        "export type thing = {\n"
+        "    -- its number\n"
+        "    id: number,\n"
+        "    tags: { string }?,\n"
+        "    state: { [string]: number },\n"
+        "    where: place,\n"
+        "}\n"
+        "\n"
+        "declare ui: {\n"
+        "    where: place,\n"
+        "}\n"
+        "\n"
+        "declare world: {\n"
+        "    item: (id: number) -> thing?,\n"
+        "    items_of: () -> { thing },\n"
+        "}\n");
+
+    SECTION("a shape given, which nothing names, is written too") {
+        const auto text = luau_declarations({}, {}, {PLACE});
+
+        REQUIRE(text == "-- where it is\nexport type place = {\n    x: number,\n    z: number,\n}\n");
+    }
+
+    SECTION("two shapes of one name whose fields differ are refused") {
+        auto functions = shaped_functions();
+        auto other = THING;
+
+        other.fields.pop_back();
+
+        functions.push_back(made("world.other", {}, {shaped_as(other)}, {}));
+
+        REQUIRE_THROWS_AS(luau_declarations(functions, {}), std::invalid_argument);
+    }
+}
+
 #if defined(JFC_LUA_LUAU)
+TEST_CASE("declarations with shapes are what Luau reads as a definitions file", "[declarations]") {
+    const std::string text = luau_declarations(shaped_functions(), TYPES);
+
+    Luau::Allocator allocator;
+    Luau::AstNameTable names(allocator);
+    Luau::ParseOptions options;
+
+    options.allowDeclarationSyntax = true;
+
+    const auto parsed = Luau::Parser::parse(text.data(), text.size(), names, allocator, options);
+
+    std::string errors;
+
+    for (const auto &each : parsed.errors) errors += each.getMessage() + "\n";
+
+    INFO(text << errors);
+
+    REQUIRE(parsed.errors.empty());
+}
+
 TEST_CASE("declarations are what Luau reads as a definitions file", "[declarations]") {
     const std::string text = luau_declarations(FUNCTIONS, TYPES);
 

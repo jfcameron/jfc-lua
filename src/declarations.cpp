@@ -6,6 +6,7 @@
 #include <array>
 #include <cctype>
 #include <set>
+#include <stdexcept>
 #include <string_view>
 
 namespace jfc::lua {
@@ -56,21 +57,67 @@ namespace jfc::lua {
             return _indent(aDepth) + "-- " + line + "\n";
         }
 
-        [[nodiscard]] std::string _type_of(const signature::value &aValue) {
-            std::string out;
+        [[nodiscard]] std::string _named(const std::string &aType) {
+            if (aType == "boolean") return "boolean";
+            if (aType == "integer" || aType == "number") return "number";
+            if (aType == "string") return "string";
+            if (aType == "table") return "{ [any]: any }";
+            if (aType == "function") return "((...any) -> ...any)";
+            if (aType == "nil") return "nil";
+            if (aType == "value" || aType == "userdata" || !_is_name(aType)) return "any";
 
-            if (aValue.type == "boolean") out = "boolean";
-            else if (aValue.type == "integer" || aValue.type == "number") out = "number";
-            else if (aValue.type == "string") out = "string";
-            else if (aValue.type == "table") out = "{ [any]: any }";
-            else if (aValue.type == "function") out = "((...any) -> ...any)";
-            else if (aValue.type == "nil") out = "nil";
-            else if (aValue.type == "value" || aValue.type == "userdata" || !_is_name(aValue.type)) out = "any";
-            else out = aValue.type;
+            return aType;
+        }
+
+        [[nodiscard]] std::string _type_of(const signature::value &aValue) {
+            std::string out = _named(aValue.type);
+
+            if (aValue.list) out = "{ " + out + " }";
+            else if (!aValue.key.empty()) out = "{ [" + _named(aValue.key) + "]: " + out + " }";
 
             if (aValue.optional && out != "any" && out != "nil") out += "?";
 
             return out;
+        }
+
+        void _shapes_of(const signature::value &aValue, std::map<std::string, const shape *> &aOut);
+
+        //! **aShape, and every shape its fields name**, by name: one name, one shape
+        void _shapes_of(const shape &aShape, std::map<std::string, const shape *> &aOut) {
+            const auto [at, added] = aOut.try_emplace(aShape.name, &aShape);
+
+            if (!added) {
+                if (!(*at->second == aShape))
+                    throw std::invalid_argument("two shapes are called " + aShape.name + ", and their fields differ");
+
+                return;
+            }
+
+            for (const auto &each : aShape.fields) _shapes_of(each.type, aOut);
+        }
+
+        void _shapes_of(const signature::value &aValue, std::map<std::string, const shape *> &aOut) {
+            if (aValue.shape) _shapes_of(*aValue.shape, aOut);
+        }
+
+        void _shapes_of(const declared &aDeclared, std::map<std::string, const shape *> &aOut) {
+            for (const auto &each : aDeclared.signature.arguments) _shapes_of(each, aOut);
+            for (const auto &each : aDeclared.signature.results) _shapes_of(each, aOut);
+        }
+
+        //! `export type thing = { ... }`, each field on a line of its own with its words over it
+        [[nodiscard]] std::string _shape(const shape &aShape) {
+            std::string out = _comment(aShape.words, 0) + "export type " + aShape.name + " = {\n";
+
+            for (const auto &each : aShape.fields)
+                out += _comment(each.words, 1) + _indent(1) + _key(each.name) + ": " + _type_of(each.type) + ",\n";
+
+            return out + "}\n";
+        }
+
+        //! what a value declared is: its signature's first result, or any where it has none
+        [[nodiscard]] std::string _value_type(const declared &aValue) {
+            return aValue.signature.results.empty() ? std::string("any") : _type_of(aValue.signature.results.front());
         }
 
         //! `a: number, b: string?`, each named as aFunction names it or by its place, self first where aSelf, and the
@@ -126,7 +173,8 @@ namespace jfc::lua {
         }
 
         [[nodiscard]] std::string _type_of(const node &aNode, const int aDepth) {
-            const std::string function = aNode.pFunction ? _function_type(*aNode.pFunction) : std::string();
+            const std::string function = !aNode.pFunction ? std::string()
+                : aNode.pFunction->value ? _value_type(*aNode.pFunction) : _function_type(*aNode.pFunction);
 
             if (aNode.children.empty()) return function;
 
@@ -145,8 +193,25 @@ namespace jfc::lua {
     }
 
     std::string luau_declarations(const std::vector<declared> &aFunctions,
-        const std::map<std::string, std::vector<declared>> &aTypes) {
+        const std::map<std::string, std::vector<declared>> &aTypes, const std::vector<shape> &aShapes) {
         std::string out;
+
+        std::map<std::string, const shape *> shapes;
+
+        for (const auto &each : aShapes) _shapes_of(each, shapes);
+
+        for (const auto &each : aFunctions) _shapes_of(each, shapes);
+
+        for (const auto &[name, methods] : aTypes)
+            for (const auto &each : methods) _shapes_of(each, shapes);
+
+        for (const auto &[name, pShape] : shapes) {
+            if (!_is_name(name)) continue;
+
+            if (!out.empty()) out += "\n";
+
+            out += _shape(*pShape);
+        }
 
         for (const auto &[name, methods] : aTypes) {
             if (!_is_name(name)) continue;
@@ -190,7 +255,11 @@ namespace jfc::lua {
 
             if (!out.empty()) out += "\n";
 
-            if (global.children.empty() && global.pFunction) {
+            if (global.children.empty() && global.pFunction && global.pFunction->value) {
+                out += _comment(global.pFunction->words, 0);
+                out += "declare " + name + ": " + _value_type(*global.pFunction) + "\n";
+            }
+            else if (global.children.empty() && global.pFunction) {
                 out += _comment(global.pFunction->words, 0);
                 out += "declare function " + name + "(" + _parameters(*global.pFunction, false, "...: any") + "): "
                     + _results(global.pFunction->signature) + "\n";

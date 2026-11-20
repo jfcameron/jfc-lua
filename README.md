@@ -66,6 +66,33 @@ A trailing `value_list_type` takes every argument left, for a function that is o
 ### What is registered
 An environment made with a name, `make_environment({standard_library::safe, {}, "rules"})`, has what is registered in it listed by `interpreter::registered()`, under that name: each function's path and signature, its arguments' and results' types as its C++ signature says them (`string`, `integer`, an optional `number`, the name a type was bound with), whether it takes or gives every value left, and whether it waits. Environments of one kind share a name and are listed together, and each bound type's methods are listed too. It is for a host that documents its API or offers completion in an editor; an environment with no name lists nothing. It lists the functions written in Lua too, as the latest environment of each name reaches them from its globals, through tables a few deep: each with the name its script was run under and the line it was defined on, so a host can read the comment over it.
 
+### Shaped tables
+A function that gives a table can say what is in it. A shape names the table and its fields, each typed as a typed function's arguments are, and a `shaped<S>` is a data table built against one:
+
+```cpp
+struct thing final {
+    static const jfc::lua::shape &describe() {
+        static const jfc::lua::shape out{"thing", {jfc::lua::field_of<double>("id"),
+            jfc::lua::field_of<std::optional<std::string>>("slot"), jfc::lua::field_of<std::vector<std::string>>("tags"),
+            jfc::lua::field_of<std::map<std::string, double>>("state")}};
+
+        return out;
+    }
+};
+
+env->register_function("world.item", [&](const double aId) {
+    jfc::lua::shaped<thing> out;
+
+    out.set("id", aId).set("tags", tags_of(aId)).set("state", state_of(aId));
+
+    return out;
+});
+```
+
+Setting a field the shape has not, or a value of the wrong kind, is a `std::logic_error`, and so is handing over a table without a field the shape does not let be left out; a function giving one is a Lua error naming the shape and the field. So what a function says it gives and what it gives stay the same. A function can give a `std::vector` of shaped tables, data tables, numbers, booleans or strings, which Lua gets as a list.
+
+Its signature names the shape, and carries it: `luau_declarations` writes each shape it meets as `export type thing = { id: number, slot: string?, tags: { string }, state: { [string]: number } }` and the function as giving `thing`, or `{ thing }` for a list. Two shapes of one name whose fields differ are refused. A `declared` with `value` set is a value rather than a function, its type its first result: `ui.style` declared as `style: style` in `ui`'s table.
+
 ### Script names
 `run` and `validate_syntax` take a name for the script, usually its file, which errors use for it and for every function it defines: `rules.lua:3: the bucket leaks`. Without one, Lua quotes the start of the script instead.
 

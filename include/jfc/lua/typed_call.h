@@ -5,6 +5,7 @@
 
 #include <jfc/lua/data_table.h>
 #include <jfc/lua/reference.h>
+#include <jfc/lua/shape.h>
 #include <jfc/lua/signature.h>
 #include <jfc/lua/table_view.h>
 #include <jfc/lua/types.h>
@@ -16,6 +17,7 @@
 #include <exception>
 #include <functional>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -23,6 +25,7 @@
 #include <tuple>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace jfc::lua::detail
 {
@@ -116,6 +119,12 @@ namespace jfc::lua::detail
     template <typename> struct is_tuple : std::false_type {};
     template <typename... value_types> struct is_tuple<std::tuple<value_types...>> : std::true_type {};
 
+    template <typename> struct is_vector : std::false_type {};
+    template <typename value_type> struct is_vector<std::vector<value_type>> : std::true_type {};
+
+    template <typename> struct is_map : std::false_type {};
+    template <typename key_type, typename value_type> struct is_map<std::map<key_type, value_type>> : std::true_type {};
+
     /// \brief a bound type's name, by its key, for a signature to say it
     using type_namer = std::function<std::string(const void *aTypeKey)>;
 
@@ -144,11 +153,39 @@ namespace jfc::lua::detail
         else if constexpr (std::is_same_v<value_type, std::nullptr_t>) return {"nil"};
         else if constexpr (is_shared_ptr<value_type>::value)
             return {aNameOf(&userdata_tag<std::remove_cv_t<typename value_type::element_type>>::id)};
+        else if constexpr (is_shaped<value_type>::value) {
+            static const auto pShape = std::make_shared<const shape>(value_type::describe());
+
+            signature::value out{pShape->name};
+
+            out.shape = pShape;
+
+            return out;
+        }
+        else if constexpr (is_vector<value_type>::value) {
+            auto out = described<typename value_type::value_type>(aNameOf);
+
+            out.list = true;
+
+            return out;
+        }
+        else if constexpr (is_map<value_type>::value) {
+            auto out = described<typename value_type::mapped_type>(aNameOf);
+
+            out.key = described<typename value_type::key_type>(aNameOf).type;
+
+            return out;
+        }
         else static_assert(always_false<value_type>, "a signature says only what a typed function can take or give");
     }
 
+
     template <typename value_type>
     void describe_argument(signature &aOut, const type_namer &aNameOf) {
+        static_assert(!is_shaped<value_type>::value && !is_map<value_type>::value
+            && (!is_vector<value_type>::value || std::is_same_v<value_type, value_list_type>),
+            "a shaped table, a list or a map is what a function gives, not what it takes");
+
         if constexpr (std::is_same_v<value_type, value_list_type>) aOut.takes_rest = true;
         else aOut.arguments.push_back(described<value_type>(aNameOf));
     }
@@ -211,6 +248,27 @@ namespace jfc::lua::detail
         else return false;
     }
 
+    //! **a list, from 1**, of shaped tables, data tables, numbers, booleans or strings
+    template <typename element_type>
+    [[nodiscard]] data_table list_of(const std::vector<element_type> &aValues) {
+        data_table out;
+
+        for (std::size_t at = 0; at < aValues.size(); ++at) {
+            const auto &each = aValues[at];
+            const key place(static_cast<double>(at + 1));
+
+            if constexpr (is_shaped<element_type>::value) out.set(place, each.table());
+            else if constexpr (std::is_same_v<element_type, data_table>) out.set(place, each);
+            else if constexpr (std::is_same_v<element_type, bool>) out.set(place, each);
+            else if constexpr (std::is_arithmetic_v<element_type>) out.set(place, static_cast<double>(each));
+            else if constexpr (std::is_same_v<element_type, std::string>) out.set(place, each);
+            else static_assert(always_false<element_type>, "a list given to lua holds shaped tables, data tables, "
+                "numbers, bool or std::string");
+        }
+
+        return out;
+    }
+
     /// \return how many values were pushed
     template <typename value_type>
     [[nodiscard]] int push_result(call_frame &aFrame, const value_type &aValue) {
@@ -258,9 +316,12 @@ namespace jfc::lua::detail
                 if (aValue) aFrame.push(userdata::make(aValue));
                 else aFrame.push_nil();
             }
+            else if constexpr (is_shaped<value_type>::value) aFrame.push(aValue.table());
+            else if constexpr (is_vector<value_type>::value) aFrame.push(list_of(aValue));
             else static_assert(always_false<value_type>, "what goes to lua can be numbers, bool, nullptr, std::string, "
                 "std::string_view, const char *, data_table, userdata, std::shared_ptr to a bound type, reference, "
-                "function_reference, or a std::optional or std::tuple of those");
+                "function_reference, a shaped table, a std::vector of shaped tables, data tables, numbers, bool or "
+                "strings, or a std::optional or std::tuple of those");
 
             return 1;
         }
@@ -472,6 +533,15 @@ namespace jfc::lua::detail
 
 namespace jfc::lua
 {
+    /// \brief **a shape's field**, its type as a typed function's would be said: `field_of<double>("count")`,
+    /// `field_of<std::optional<std::string>>("slot")`, `field_of<std::vector<std::string>>("tags")`,
+    /// `field_of<std::map<std::string, double>>("state")`, `field_of<shaped<place>>("where")`
+    template <typename value_type>
+    [[nodiscard]] shape::field field_of(std::string aName, std::string aWords = {}) {
+        return {std::move(aName), detail::described<value_type>([](const void *) { return std::string("userdata"); }),
+            std::move(aWords)};
+    }
+
     /// \brief a method for interpreter::register_type, which says what it takes in its own signature
     ///
     /// Its first parameter is a reference to the object. What follows reads as a typed function's arguments do, numbered
