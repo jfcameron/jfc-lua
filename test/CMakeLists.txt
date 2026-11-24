@@ -22,6 +22,7 @@ jfc_add_tests(
         "${CMAKE_CURRENT_LIST_DIR}/interpreter_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/keyed_access_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/limits_test.cpp"
+        "${CMAKE_CURRENT_LIST_DIR}/numeric_key_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/path_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/protected_test.cpp"
         "${CMAKE_CURRENT_LIST_DIR}/reference_test.cpp"

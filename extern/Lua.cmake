@@ -45,6 +45,17 @@ elseif (JFC_LUA_BACKEND STREQUAL "lua51")
 
     string(REPLACE "${_lua_table_line}" "cast(unsigned int, key) - 1u < cast(unsigned int, t->sizearray)"
         _lua_table "${_lua_table}")
+
+    # it also casts every numeric key to int before its range check, which is undefined for keys like 2^32 or inf
+    set(_lua_key_line "lua_number2int(k, n);")
+    string(FIND "${_lua_table}" "${_lua_key_line}" _lua_key_at)
+
+    if (_lua_key_at EQUAL -1)
+        message(FATAL_ERROR "extern/lua51/src/ltable.c no longer has the key cast jfc-lua replaces")
+    endif()
+
+    string(REPLACE "${_lua_key_line}" "k = n > -2147483649.0 && n < 2147483648.0 ? cast_int(n) : 0;"
+        _lua_table "${_lua_table}")
     file(WRITE "${_lua_table_copy}.new" "${_lua_table}")
     configure_file("${_lua_table_copy}.new" "${_lua_table_copy}" COPYONLY)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_lua_root}/ltable.c")

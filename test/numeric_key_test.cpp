@@ -24,6 +24,14 @@ namespace {
         lua_settable(apState, 1);
     }
 
+    void push_function(lua_State *const apState, const lua_CFunction aFunction) {
+#if defined(JFC_LUA_LUAU)
+        lua_pushcfunction(apState, aFunction, "numeric key test");
+#else
+        lua_pushcfunction(apState, aFunction);
+#endif
+    }
+
     void check(lua_State *const apState, const double aKey, const lua_Integer aValue) {
         CAPTURE(aKey);
         lua_pushnumber(apState, aKey);
@@ -130,7 +138,7 @@ TEST_CASE("numeric probes retain zero aliasing and reject NaN writes", "[numeric
     lua_gettable(pState, 1);
     REQUIRE(lua_isnil(pState, -1));
     lua_pop(pState, 1);
-    lua_pushcfunction(pState, [](lua_State *const apState) -> int {
+    push_function(pState, [](lua_State *const apState) -> int {
         lua_newtable(apState);
         lua_pushnumber(apState, std::numeric_limits<double>::quiet_NaN());
         lua_pushboolean(apState, true);
