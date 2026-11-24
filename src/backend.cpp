@@ -1,15 +1,37 @@
 // © Joseph Cameron - MIT License
 
 #include <jfc/lua/backend.h>
+#include <jfc/lua/compiles_kept.h>
 
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <typeindex>
 #include <typeinfo>
+#include <unordered_map>
 
 namespace jfc::lua::backend {
+    namespace {
+        struct kept_store_type final {
+            std::mutex lock;
+
+            std::unordered_map<std::string, std::string> compiled;
+
+            std::size_t bytes = 0;
+
+            std::size_t compiles = 0;
+        };
+
+        //! never destroyed, so a script compiled as the program ends finds it there
+        kept_store_type &kept_store() {
+            static auto *const pStore = new kept_store_type;
+
+            return *pStore;
+        }
+    }
+
     bool is_lua_error(const std::exception &aError) {
 #if defined(JFC_LUA_LUAU)
         static const std::type_index ERROR_TYPE = [] {
@@ -45,8 +67,24 @@ namespace jfc::lua::backend {
         return aName.empty() ? aSource : "@" + std::string(aName);
     }
 
+    kept_compiles compiles_kept() {
+        auto &kept = kept_store();
+
+        const std::scoped_lock held(kept.lock);
+
+        return {kept.compiled.size(), kept.bytes, kept.compiles};
+    }
+
     std::string compile(const std::string &aSource) {
 #if defined(JFC_LUA_LUAU)
+        auto &kept = kept_store();
+
+        {
+            const std::scoped_lock held(kept.lock);
+
+            if (const auto found = kept.compiled.find(aSource); found != kept.compiled.end()) return found->second;
+        }
+
         lua_CompileOptions options{};
 
         options.optimizationLevel = 1;
@@ -57,7 +95,24 @@ namespace jfc::lua::backend {
         const std::unique_ptr<char, decltype(&std::free)> bytecode(
             luau_compile(aSource.c_str(), std::strlen(aSource.c_str()), &options, &size), &std::free);
 
-        return bytecode ? std::string(bytecode.get(), size) : std::string();
+        auto out = bytecode ? std::string(bytecode.get(), size) : std::string();
+
+        const auto bytes = aSource.size() + out.size();
+
+        const std::scoped_lock held(kept.lock);
+
+        ++kept.compiles;
+
+        if (bytes > MOST_KEPT_BYTES) return out;
+
+        if (kept.bytes + bytes > MOST_KEPT_BYTES) {
+            kept.compiled.clear();
+            kept.bytes = 0;
+        }
+
+        if (kept.compiled.emplace(aSource, out).second) kept.bytes += bytes;
+
+        return out;
 #else
         return aSource;
 #endif

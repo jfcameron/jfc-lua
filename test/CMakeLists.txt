@@ -42,6 +42,8 @@ jfc_add_tests(
         jfclua
 )
 
+target_include_directories(jfclua_test_0 PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../src/include")
+
 if (TARGET jfclua_checker)
     target_link_libraries(jfclua_test_0 PRIVATE jfclua_checker)
 endif()

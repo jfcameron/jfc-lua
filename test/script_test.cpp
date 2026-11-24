@@ -3,6 +3,7 @@
 #include <jfc/catch.hpp>
 
 #include <jfc/lua.h>
+#include <jfc/lua/compiles_kept.h>
 
 #include <chrono>
 #include <string>
@@ -73,4 +74,58 @@ TEST_CASE("a compiled script keeps to its environment's time budget", "[script][
 
     REQUIRE(error);
     REQUIRE_THAT(*error, Catch::Matchers::Contains("time budget"));
+}
+
+TEST_CASE("a source compiled again is given what it compiled to, and runs the same", "[script][kept]") {
+    const std::string source = "kept_once = (kept_once or 0) + 1";
+
+    interpreter lua;
+
+    auto env = lua.make_environment();
+
+    const auto before = backend::compiles_kept();
+
+    const script first(source, "first.lua");
+    const script second(source, "second.lua");
+
+    REQUIRE_FALSE(env->run(first));
+    REQUIRE_FALSE(env->run(second));
+    REQUIRE_FALSE(env->run(source));
+    REQUIRE(env->read_number("kept_once") == 3);
+
+    const auto after = backend::compiles_kept();
+
+#if defined(JFC_LUA_LUAU)
+    REQUIRE(after.compiled == before.compiled + 1);
+    REQUIRE(after.sources >= 1);
+#else
+    REQUIRE(after.compiled == before.compiled);
+    REQUIRE(after.sources == 0);
+#endif
+}
+
+TEST_CASE("what is kept stays under the most bytes, all let go when one more would pass it", "[script][kept]") {
+    const auto sized = [](const std::size_t aBytes, const char aFill) {
+        return "return \"" + std::string(aBytes, aFill) + "\"";
+    };
+
+    for (const char each : {'a', 'b', 'c', 'd', 'e'}) {
+        static_cast<void>(script(sized(backend::MOST_KEPT_BYTES / 6, each)));
+
+        REQUIRE(backend::compiles_kept().bytes <= backend::MOST_KEPT_BYTES);
+    }
+
+#if defined(JFC_LUA_LUAU)
+    REQUIRE(backend::compiles_kept().sources < 5);
+
+    const auto before = backend::compiles_kept();
+
+    const auto huge = sized(backend::MOST_KEPT_BYTES, 'z');
+
+    static_cast<void>(script(huge));
+    static_cast<void>(script(huge));
+
+    REQUIRE(backend::compiles_kept().compiled == before.compiled + 2);
+    REQUIRE(backend::compiles_kept().sources == before.sources);
+#endif
 }

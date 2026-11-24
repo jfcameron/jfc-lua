@@ -132,7 +132,8 @@ namespace jfc::lua::backend {
     /// itself, as luaL_loadstring names it
     [[nodiscard]] std::string chunk_name(const std::string &aSource, std::string_view aName);
 
-    /// \brief compiled to what `load_compiled` loads: Luau's bytecode, or under Lua 5.1 the source as it was
+    /// \brief compiled to what `load_compiled` loads: Luau's bytecode, or under Lua 5.1 the source as it was. A source
+    /// compiled before is given what it compiled to then, by any thread. \see compiles_kept.h
     [[nodiscard]] std::string compile(const std::string &aSource);
 
     /// \brief what `compile` made, loaded under aChunkName as a function of the globals it is loaded among, on top of the
